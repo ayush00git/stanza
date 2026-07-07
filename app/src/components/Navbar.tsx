@@ -1,7 +1,7 @@
 const links = [
-  { label: 'Anthology', href: '#anthology' },
-  { label: 'The studio', href: '#features' },
-  { label: 'Colophon', href: '#colophon' },
+  { label: 'Pipeline', href: '#pipeline' },
+  { label: 'Data', href: '#data' },
+  { label: 'Docs', href: '#colophon' },
 ]
 
 export default function Navbar() {
@@ -30,10 +30,10 @@ export default function Navbar() {
         </ul>
 
         <a
-          href="#start"
+          href="#pipeline"
           className="rounded-full border border-ink px-4 py-1.5 text-sm font-medium text-ink transition-colors hover:bg-ink hover:text-paper"
         >
-          Start a draft
+          Request access
         </a>
       </nav>
     </header>

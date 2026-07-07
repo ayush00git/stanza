@@ -1,7 +1,7 @@
 import Navbar from '../components/Navbar'
 import Hero from '../components/Hero'
-import Features from '../components/Features'
-import Anthology from '../components/Anthology'
+import Pipeline from '../components/Pipeline'
+import Integrations from '../components/Integrations'
 import Footer from '../components/Footer'
 
 export default function Home() {
@@ -10,8 +10,8 @@ export default function Home() {
       <Navbar />
       <main>
         <Hero />
-        <Features />
-        <Anthology />
+        <Pipeline />
+        <Integrations />
       </main>
       <Footer />
     </div>

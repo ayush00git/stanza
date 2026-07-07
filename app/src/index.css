@@ -1,14 +1,20 @@
 @import "tailwindcss";
 
 @theme {
-  /* Palette — warm paper, warm ink, restrained ink-violet accent */
-  --color-paper: #fcfbf9;
-  --color-paper-deep: #f5f2ec;
-  --color-ink: #1b1a17;
-  --color-muted: #6e6a63;
-  --color-hairline: #e7e3da;
-  --color-accent: #4c3b6e;
-  --color-accent-soft: #ede9f2;
+  /* Palette — cool clinical paper, ink, assay-blue accent */
+  --color-paper: #fbfcfd;
+  --color-paper-deep: #f3f6f9;
+  --color-ink: #12161c;
+  --color-muted: #5a636e;
+  --color-hairline: #e3e8ee;
+  --color-accent: #1a56db;
+  --color-accent-soft: #e8effc;
+
+  /* AlphaFold pLDDT confidence scale — used only for the confidence strip */
+  --color-conf-veryhigh: #0053d6;
+  --color-conf-confident: #65cbf3;
+  --color-conf-low: #ffdb13;
+  --color-conf-verylow: #ff7d45;
 
   /* Type roles */
   --font-display: "Fraunces", ui-serif, Georgia, serif;
@@ -49,7 +55,7 @@
   }
 }
 
-/* Staggered rise for hero verse lines */
+/* Staggered rise for hero elements */
 @keyframes rise {
   from {
     opacity: 0;

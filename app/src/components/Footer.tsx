@@ -10,19 +10,20 @@ export default function Footer() {
             Stanza<span className="text-accent">.</span>
           </p>
           <p className="mt-3 max-w-xs text-sm leading-relaxed text-muted">
-            Set in Fraunces and Inter. Built for the words, and nothing more.
+            Structure-guided drug discovery, from protein target to lead
+            candidate.
           </p>
         </div>
 
         <div className="flex gap-10 font-mono text-xs uppercase tracking-[0.15em] text-muted">
+          <a href="#pipeline" className="transition-colors hover:text-ink">
+            Pipeline
+          </a>
+          <a href="#data" className="transition-colors hover:text-ink">
+            Data
+          </a>
           <a href="#top" className="transition-colors hover:text-ink">
             Back to top
-          </a>
-          <a href="#features" className="transition-colors hover:text-ink">
-            The studio
-          </a>
-          <a href="#anthology" className="transition-colors hover:text-ink">
-            Anthology
           </a>
         </div>
       </div>
