@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import type { Complex } from '../lib/api'
 import { getComplex } from '../lib/api'
 import { plddtBand } from '../lib/plddt'
@@ -24,6 +25,7 @@ function PlddtChip({ label, value }: { label: string; value: number }) {
 }
 
 export default function ComplexCard({ complex }: { complex: Complex }) {
+  const navigate = useNavigate()
   const [detail, setDetail] = useState<Complex | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -32,6 +34,10 @@ export default function ComplexCard({ complex }: { complex: Complex }) {
   const drugs = detail ?? complex
   const drugKnown = drugs.drug_count >= 0
   const diseases = complex.disease_associations ?? []
+
+  // Clicking the card opens the structure viewer page. Routed at /structure/:id
+  // (not /complex/:id, which the API proxy owns).
+  const openViewer = () => navigate(`/structure/${encodeURIComponent(complex.uniprot_id)}`)
 
   async function loadDetail() {
     if (loading) return
@@ -47,7 +53,18 @@ export default function ComplexCard({ complex }: { complex: Complex }) {
   }
 
   return (
-    <article className="flex flex-col rounded-xl border border-hairline bg-paper p-6 transition-shadow hover:shadow-[0_18px_40px_-30px_rgba(18,22,28,0.5)]">
+    <article
+      role="button"
+      tabIndex={0}
+      onClick={openViewer}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          openViewer()
+        }
+      }}
+      className="flex cursor-pointer flex-col rounded-xl border border-hairline bg-paper p-6 transition-shadow hover:shadow-[0_18px_40px_-30px_rgba(18,22,28,0.5)]"
+    >
       <header className="flex items-baseline justify-between gap-3">
         <h3 className="font-display text-xl font-medium text-ink">
           {complex.gene_name || complex.uniprot_id}
@@ -56,6 +73,7 @@ export default function ComplexCard({ complex }: { complex: Complex }) {
           href={`https://www.uniprot.org/uniprotkb/${complex.uniprot_id}`}
           target="_blank"
           rel="noreferrer"
+          onClick={(e) => e.stopPropagation()}
           className="font-mono text-xs text-accent underline decoration-transparent underline-offset-2 transition-colors hover:decoration-accent"
         >
           {complex.uniprot_id}
@@ -117,7 +135,10 @@ export default function ComplexCard({ complex }: { complex: Complex }) {
           ) : (
             <button
               type="button"
-              onClick={loadDetail}
+              onClick={(e) => {
+                e.stopPropagation()
+                loadDetail()
+              }}
               disabled={loading}
               className="font-medium text-accent underline decoration-hairline underline-offset-2 transition-colors hover:decoration-accent disabled:opacity-50"
             >
@@ -126,16 +147,12 @@ export default function ComplexCard({ complex }: { complex: Complex }) {
           )}
         </div>
 
-        {complex.complex_structure_url || complex.monomer_structure_url ? (
-          <a
-            href={complex.complex_structure_url || complex.monomer_structure_url}
-            target="_blank"
-            rel="noreferrer"
-            className="font-mono text-xs text-ink underline decoration-hairline underline-offset-4 transition-colors hover:decoration-accent"
-          >
-            Structure ↗
-          </a>
-        ) : null}
+        <span
+          aria-hidden
+          className="font-mono text-xs text-ink underline decoration-hairline underline-offset-4"
+        >
+          View 3D →
+        </span>
       </div>
 
       {error && <p className="mt-2 text-xs text-conf-verylow">{error}</p>}
