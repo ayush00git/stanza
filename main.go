@@ -16,13 +16,9 @@ func main() {
 		})
 	})
 
-	// Protein data routes (AlphaFold + UniProt), keyed by UniProt accession.
-	protein := r.Group("/protein")
-	{
-		protein.GET("/:id", handlers.GetProtein)         // combined UniProt + AlphaFold
-		protein.GET("/:id/monomer", handlers.GetMonomer) // AlphaFold monomer prediction
-		protein.GET("/:id/dimer", handlers.GetDimer)     // AlphaFold complex (dimer) data
-	}
+	// Search (SSE) and per-complex detail: monomer + dimer data in one response.
+	r.GET("/search", handlers.SearchHandler)
+	r.GET("/complex/:id", handlers.ComplexDetailHandler)
 
 	r.Run(":8080")
 }

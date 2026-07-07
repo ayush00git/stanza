@@ -10,7 +10,7 @@ import (
 )
 
 // 30s timeout absorbs cold-start latency (DNS + TLS handshake) on the first
-// outbound request so a cold first request doesn't fail before warming up.
+// outbound request so a cold first search doesn't fail before warming up.
 var alphafoldClient = &http.Client{Timeout: 30 * time.Second}
 
 const alphafoldBaseURL = "https://alphafold.ebi.ac.uk/api"
@@ -23,7 +23,7 @@ type AlphaFoldPrediction struct {
 	Gene              string  `json:"gene"`
 	Description       string  `json:"uniprotDescription"`
 	TaxID             int     `json:"taxId"`
-	OrgName           string  `json:"organismScientificName"`
+	OrgName           string  `json:"organismsScientificName"`
 	CifURL            string  `json:"cifUrl"`
 	PdbURL            string  `json:"pdbUrl"`
 	GlobalMetricValue float64 `json:"globalMetricValue"`
@@ -59,10 +59,6 @@ func FetchMonomerPrediction(uniprotID string) (*AlphaFoldPrediction, error) {
 	}
 
 	body, err := io.ReadAll(reader)
-	if err != nil {
-		return nil, fmt.Errorf("alphafold: read failed for %s: %w", uniprotID, err)
-	}
-
 	var predictions []AlphaFoldPrediction
 	if err := json.Unmarshal(body, &predictions); err != nil {
 		return nil, fmt.Errorf("alphafold: failed to parse response for %s: %w. Raw: %s", uniprotID, err, string(body[:min(200, len(body))]))
@@ -75,16 +71,22 @@ func FetchMonomerPrediction(uniprotID string) (*AlphaFoldPrediction, error) {
 	return &predictions[0], nil
 }
 
-// ComplexData captures the dimer (complex) vs monomer comparison for a UniProt ID.
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 type ComplexData struct {
-	MonomerPLDDT   float64 `json:"monomerPlddt"`
-	DimerPLDDT     float64 `json:"dimerPlddt"`
-	DisorderDelta  float64 `json:"disorderDelta"`
-	MonomerEntryID string  `json:"monomerEntryId"`
-	MonomerCifURL  string  `json:"monomerCifUrl"`
-	ComplexEntryID string  `json:"complexEntryId"`
-	ComplexCifURL  string  `json:"complexCifUrl"`
-	IpTMScore      float64 `json:"ipTmScore"`
+	MonomerPLDDT   float64
+	DimerPLDDT     float64
+	DisorderDelta  float64
+	MonomerEntryID string
+	MonomerCifURL  string
+	ComplexEntryID string
+	ComplexCifURL  string
+	IpTMScore      float64
 }
 
 type alphaFoldSearchResponse struct {
@@ -100,10 +102,6 @@ type alphaFoldSearchResponse struct {
 	} `json:"docs"`
 }
 
-// FetchComplexData queries the AlphaFold search endpoint for both the monomer and
-// any complex (dimer) prediction of a UniProt ID, returning their pLDDT scores and
-// the confidence delta between them. If no complex exists, the dimer fields mirror
-// the monomer and DisorderDelta is 0.
 func FetchComplexData(uniprotID string) (*ComplexData, error) {
 	urlStr := fmt.Sprintf("%s/search?q=%s&type=complex", alphafoldBaseURL, uniprotID)
 	resp, err := alphafoldClient.Get(urlStr)
