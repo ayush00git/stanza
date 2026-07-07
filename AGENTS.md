@@ -6,6 +6,8 @@ Guidance for AI coding agents working in this repository. Read this before makin
 
 1. **One feature = one commit.** Each self-contained feature, fix, or change ships as its own commit. Don't batch unrelated changes into a single commit, and don't split one feature across many. Write a clear, descriptive commit message that explains what the feature does.
 
+   **Use the Conventional Commits format** for every message: `<type>: <description>`. See [Commit message format](#commit-message-format) below.
+
 2. **Commit on `main`. Do not create branches.** All work lands directly on the `main` branch. Do not create feature branches, do not open PRs, do not switch branches.
 
 3. **Do not push.** After committing, **notify the user that there are commits ready to push on `main`.** The user pushes. You commit only.
@@ -25,13 +27,50 @@ For each feature:
    ```
    git add <specific files within your scope>
    ```
-4. Commit with a descriptive message:
+4. Commit with a descriptive message in Conventional Commits format:
    ```
-   git commit -m "Add <feature>: <what it does>"
+   git commit -m "feat: <what it does>"
    ```
 5. Repeat for the next feature — a new commit each time.
 6. When done (or at a good stopping point), tell the user:
    > "There are N commit(s) ready on `main`. Please push when ready."
+
+## Commit message format
+
+Follow the [Conventional Commits](https://www.conventionalcommits.org/) standard. Every commit message starts with a **type**, then an optional scope, then a short imperative description:
+
+```
+<type>(<optional scope>): <description>
+```
+
+Use these types:
+
+| Type | Use for |
+|------|---------|
+| `feat:` | A new feature or capability |
+| `fix:` | A bug fix |
+| `chore:` | Tooling, deps, config, or other non-code housekeeping |
+| `refactor:` | Code change that neither fixes a bug nor adds a feature |
+| `docs:` | Documentation-only changes |
+| `test:` | Adding or fixing tests |
+| `style:` | Formatting, whitespace, no logic change |
+| `perf:` | Performance improvement |
+| `build:` | Build system or dependency changes |
+| `ci:` | CI/CD configuration changes |
+
+Rules:
+- Description is lowercase, imperative mood ("add", not "added"/"adds"), no trailing period.
+- Keep the subject line under ~72 characters; add a body below a blank line if more detail is needed.
+- Optional scope names the area touched, e.g. `feat(auth): add token refresh`.
+
+Examples:
+```
+feat: add JSON output flag to the CLI
+fix: handle empty config file without panicking
+refactor(parser): extract token scanner into its own type
+chore: bump go.mod dependencies
+docs: document the working-directory isolation rule
+```
 
 ## Don't
 
