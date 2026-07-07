@@ -24,5 +24,12 @@ func main() {
 	// structures and returns detected pockets with a monomer/dimer comparison.
 	r.GET("/complex/:id/binding-sites", handlers.BindingSiteHandler)
 
+	// ChEMBL fragment selection for a pocket.
+	r.GET("/chembl", handlers.ChemblHandler)
+
+	// Docking: submit an async job and poll its status.
+	r.POST("/dock", handlers.DockSubmitHandler)
+	r.GET("/dock/status", handlers.DockStatusHandler)
+
 	r.Run(":8080")
 }
