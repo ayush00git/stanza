@@ -2,9 +2,10 @@
  * Client for the Stanza Go API.
  *
  * Endpoints (proxied to the Go server in dev via vite.config.ts):
- *   GET /health          -> { status: "ok" }
- *   GET /search?q=...     -> Server-Sent Events stream of Complex results
- *   GET /complex/:id      -> a single Complex (id = UniProt or AlphaFold ID)
+ *   GET /health                      -> { status: "ok" }
+ *   GET /search?q=...                -> Server-Sent Events stream of Complex results
+ *   GET /complex/:id                 -> a single Complex (id = UniProt or AlphaFold ID)
+ *   GET /complex/:id/binding-sites   -> fpocket BindingSiteResult (monomer + dimer)
  */
 
 /** Mirrors models.Complex (JSON tags) from the Go backend. */
@@ -26,6 +27,68 @@ export type Complex = {
   complex_structure_url: string
   category: string
   review_status: string
+}
+
+/** Per-residue confidence for a pocket residue. Mirrors models.ResidueConfidence. */
+export type ResidueConfidence = {
+  residue_index: number
+  chain: string
+  monomer_plddt: number
+  dimer_plddt: number
+  delta: number
+}
+
+/** A druggable pocket detected by fpocket. Mirrors models.Pocket. */
+export type Pocket = {
+  pocket_id: number
+  druggability_score: number
+  volume: number
+  surface_area: number
+  depth: number
+  hydrophobicity: number
+  polarity: number
+  source_type: 'monomer' | 'dimer' | string
+  is_interface_pocket: boolean
+  is_conserved?: boolean
+  is_emergent?: boolean
+  avg_disorder_delta: number
+  avg_plddt: number
+  residue_indices: number[]
+  residue_names: string[]
+  residue_chains: string[]
+  chains?: string[]
+  center: [number, number, number]
+  residue_confidences: ResidueConfidence[]
+}
+
+/** Subset of models.ComparisonResult we surface on the viewer page. */
+export type ComparisonResult = {
+  ddgi: number
+  pocket_mapping: {
+    conserved_count: number
+    monomer_only_count: number
+    emergent_count: number
+    interface_count: number
+  }
+  summary_metrics: {
+    total_monomer_pockets: number
+    total_dimer_pockets: number
+    interface_pocket_count: number
+    avg_monomer_druggability: number
+    avg_dimer_druggability: number
+  }
+}
+
+/** Full binding-site analysis for a complex. Mirrors models.BindingSiteResult. */
+export type BindingSiteResult = {
+  uniprot_id: string
+  complex_entry_id: string
+  total_pockets: number
+  interface_pocket_count: number
+  pockets: Pocket[]
+  monomer_total_pockets: number
+  monomer_pockets: Pocket[]
+  comparison?: ComparisonResult | null
 }
 
 export type SearchSource = 'live' | 'fallback'
@@ -106,6 +169,25 @@ export async function getComplex(
     throw new Error(body.error ?? `Request failed (${res.status})`)
   }
   return (await res.json()) as Complex
+}
+
+/**
+ * Run fpocket binding-site analysis for a complex. This is slow — the backend
+ * downloads the monomer and dimer structures and runs fpocket on each — so
+ * callers should show a pending state and allow a generous timeout.
+ */
+export async function getBindingSites(
+  id: string,
+  signal?: AbortSignal,
+): Promise<BindingSiteResult> {
+  const res = await fetch(`/complex/${encodeURIComponent(id)}/binding-sites`, {
+    signal,
+  })
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string }
+    throw new Error(body.error ?? `Binding-site analysis failed (${res.status})`)
+  }
+  return (await res.json()) as BindingSiteResult
 }
 
 /** Ping the backend. Resolves true when the API is reachable and healthy. */
