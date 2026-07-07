@@ -1,0 +1,7 @@
+# Compiled binary
+/stanza
+
+# Go
+*.exe
+*.test
+*.out
