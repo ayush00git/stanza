@@ -5,6 +5,7 @@ import { getBindingSites, getComplex } from '../lib/api'
 import { plddtBands } from '../lib/plddt'
 import MolstarViewer, { type HighlightResidue } from '../components/viewer/MolstarViewer'
 import BindingSitesPanel, { pocketKey } from '../components/viewer/BindingSitesPanel'
+import DockingPanel from '../components/viewer/DockingPanel'
 
 /** Pair each residue index with its chain into Mol* highlight targets. */
 function pocketResidues(pocket: Pocket): HighlightResidue[] {
@@ -81,24 +82,36 @@ export default function ComplexViewerPage() {
   const [bsStatus, setBsStatus] = useState<BsStatus>('loading')
   const [bsError, setBsError] = useState<string | null>(null)
 
-  // Selected pocket — clicking a row highlights it in the matching viewer.
-  const [selectedPocket, setSelectedPocket] = useState<Pocket | null>(null)
-  const selectedKey = selectedPocket ? pocketKey(selectedPocket) : null
+  // Selected pocket — kept SEPARATELY per structure so each viewer's highlight
+  // persists independently. Clicking a pocket replaces the selection for its own
+  // structure only; it never toggles off and never clears the other structure.
+  const [selectedMonomer, setSelectedMonomer] = useState<Pocket | null>(null)
+  const [selectedDimer, setSelectedDimer] = useState<Pocket | null>(null)
+  // The most-recently-clicked pocket drives the docking panel below.
+  const [focusedPocket, setFocusedPocket] = useState<Pocket | null>(null)
 
-  // Toggle selection off when the same pocket is clicked again.
-  const handleSelect = (p: Pocket) =>
-    setSelectedPocket((prev) => (prev && pocketKey(prev) === pocketKey(p) ? null : p))
+  const selectedKeys = useMemo(() => {
+    const keys = new Set<string>()
+    if (selectedMonomer) keys.add(pocketKey(selectedMonomer))
+    if (selectedDimer) keys.add(pocketKey(selectedDimer))
+    return keys
+  }, [selectedMonomer, selectedDimer])
 
-  // A monomer pocket highlights the monomer viewer; anything else (dimer /
-  // interface) highlights the dimer viewer. Empty array clears the other one.
-  const isMonomer = selectedPocket?.source_type === 'monomer'
+  const handleSelect = (p: Pocket) => {
+    if (p.source_type === 'monomer') setSelectedMonomer(p)
+    else setSelectedDimer(p)
+    setFocusedPocket(p)
+  }
+
+  // Each structure's selection routes to its own viewer's highlight; an empty
+  // array leaves a viewer un-highlighted until one of its pockets is clicked.
   const monomerHighlight = useMemo<HighlightResidue[]>(
-    () => (selectedPocket && isMonomer ? pocketResidues(selectedPocket) : []),
-    [selectedPocket, isMonomer],
+    () => (selectedMonomer ? pocketResidues(selectedMonomer) : []),
+    [selectedMonomer],
   )
   const dimerHighlight = useMemo<HighlightResidue[]>(
-    () => (selectedPocket && !isMonomer ? pocketResidues(selectedPocket) : []),
-    [selectedPocket, isMonomer],
+    () => (selectedDimer ? pocketResidues(selectedDimer) : []),
+    [selectedDimer],
   )
 
   // Metadata (fast) and fpocket analysis (slow) load in parallel on mount.
@@ -115,7 +128,9 @@ export default function ComplexViewerPage() {
         }
       })
 
-    setSelectedPocket(null)
+    setSelectedMonomer(null)
+    setSelectedDimer(null)
+    setFocusedPocket(null)
     setBs(null)
     setBsError(null)
     setBsStatus('loading')
@@ -250,9 +265,22 @@ export default function ComplexViewerPage() {
             status={bsStatus}
             result={bs}
             error={bsError}
-            selectedKey={selectedKey}
+            selectedKeys={selectedKeys}
             onSelect={handleSelect}
           />
+
+          {/* Fragment docking for the most-recently-clicked pocket */}
+          {focusedPocket && (
+            <>
+              <div className="mx-auto w-full max-w-5xl border-t border-hairline px-6 pt-8">
+                <h2 className="font-display text-xl font-medium text-ink">
+                  Pocket P{focusedPocket.pocket_id} ·{' '}
+                  <span className="text-muted">{focusedPocket.source_type}</span>
+                </h2>
+              </div>
+              <DockingPanel pocket={focusedPocket} uniprotId={complex.uniprot_id} />
+            </>
+          )}
         </>
       )}
     </div>

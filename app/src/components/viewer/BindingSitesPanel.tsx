@@ -147,12 +147,12 @@ function byDruggability(pockets: Pocket[]): Pocket[] {
 function PocketColumn({
   title,
   pockets,
-  selectedKey,
+  selectedKeys,
   onSelect,
 }: {
   title: string
   pockets: Pocket[]
-  selectedKey: string | null
+  selectedKeys: Set<string>
   onSelect: (p: Pocket) => void
 }) {
   const sorted = byDruggability(pockets)
@@ -175,7 +175,7 @@ function PocketColumn({
               key={pocketKey(p)}
               pocket={p}
               rank={i}
-              active={selectedKey === pocketKey(p)}
+              active={selectedKeys.has(pocketKey(p))}
               onSelect={onSelect}
             />
           ))}
@@ -194,13 +194,13 @@ export default function BindingSitesPanel({
   status,
   result,
   error,
-  selectedKey,
+  selectedKeys,
   onSelect,
 }: {
   status: Status
   result: BindingSiteResult | null
   error: string | null
-  selectedKey: string | null
+  selectedKeys: Set<string>
   onSelect: (p: Pocket) => void
 }) {
   return (
@@ -248,13 +248,13 @@ export default function BindingSitesPanel({
               <PocketColumn
                 title="Dimer · complex"
                 pockets={result.pockets}
-                selectedKey={selectedKey}
+                selectedKeys={selectedKeys}
                 onSelect={onSelect}
               />
               <PocketColumn
                 title="Monomer"
                 pockets={result.monomer_pockets}
-                selectedKey={selectedKey}
+                selectedKeys={selectedKeys}
                 onSelect={onSelect}
               />
             </div>
