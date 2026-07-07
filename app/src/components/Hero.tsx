@@ -43,10 +43,10 @@ export default function Hero() {
 
           <div className="mt-10 flex flex-wrap items-center gap-4">
             <a
-              href="#pipeline"
+              href="#search"
               className="rounded-full bg-ink px-6 py-3 text-sm font-medium text-paper transition-transform hover:-translate-y-0.5"
             >
-              Request access
+              Search a target
             </a>
             <a
               href="#pipeline"
