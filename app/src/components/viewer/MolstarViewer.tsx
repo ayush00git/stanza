@@ -1,21 +1,32 @@
-import { useMolstar } from './useMolstar'
+import { useMolstar, type HighlightResidue } from './useMolstar'
+
+export type { HighlightResidue }
 
 interface MolstarViewerProps {
   url?: string
   label: string
   plddt?: number
   representation: string
+  /** Residues of the selected pocket to spotlight in this viewer. */
+  highlight?: HighlightResidue[]
 }
 
 /**
  * A single Mol* canvas: renders one structure loaded from a remote URL, with a
  * caption and loading/error/empty overlays. All Mol* logic lives in useMolstar.
  */
-export default function MolstarViewer({ url, label, plddt, representation }: MolstarViewerProps) {
+export default function MolstarViewer({
+  url,
+  label,
+  plddt,
+  representation,
+  highlight,
+}: MolstarViewerProps) {
   const { containerRef, isLoading, error } = useMolstar({
     structureUrl: url,
     representation,
     label,
+    highlight,
   })
 
   return (
