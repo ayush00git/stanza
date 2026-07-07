@@ -3,6 +3,11 @@ import { plddtBand } from '../../lib/plddt'
 
 type Status = 'loading' | 'done' | 'error'
 
+/** Stable identity for a pocket (pocket_id repeats across monomer/dimer). */
+export function pocketKey(p: Pocket): string {
+  return `${p.source_type}-${p.pocket_id}`
+}
+
 function Chip({ label, value }: { label: string; value: string | number }) {
   return (
     <span className="inline-flex items-baseline gap-1.5 rounded-md border border-hairline bg-paper px-2.5 py-1">
@@ -14,62 +19,119 @@ function Chip({ label, value }: { label: string; value: string | number }) {
   )
 }
 
-/** One detected pocket: druggability, confidence, and structural flags. */
-function PocketRow({ pocket }: { pocket: Pocket }) {
+/** A single labelled metric: caption above, value below. */
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-muted">
+        {label}
+      </span>
+      <span className="font-mono text-xs text-ink tabular-nums">{value}</span>
+    </div>
+  )
+}
+
+/**
+ * One detected pocket, with every fpocket metric clearly labelled. `rank` is
+ * the pocket's position within its (druggability-sorted) column; rank 0 is the
+ * most druggable and gets a "Top" marker.
+ */
+function PocketRow({
+  pocket,
+  rank,
+  active,
+  onSelect,
+}: {
+  pocket: Pocket
+  rank: number
+  active: boolean
+  onSelect: (p: Pocket) => void
+}) {
   const score = Math.max(0, Math.min(1, pocket.druggability_score))
   const residues = pocket.residue_indices?.length ?? 0
+  const isTop = rank === 0
   return (
-    <li className="grid grid-cols-[2.5rem_1fr] gap-x-3 border-b border-hairline py-3 last:border-b-0">
-      <span className="font-mono text-xs text-muted">P{pocket.pocket_id}</span>
+    <li
+      onClick={() => onSelect(pocket)}
+      aria-selected={active}
+      className={`grid cursor-pointer grid-cols-[2.5rem_1fr] gap-x-3 border-b border-hairline px-2 py-4 transition-colors last:border-b-0 ${
+        active ? 'bg-accent-soft' : 'hover:bg-paper-deep'
+      }`}
+    >
+      <span className={`font-mono text-xs ${active ? 'text-accent' : 'text-muted'}`}>
+        P{pocket.pocket_id}
+      </span>
 
       <div>
-        {/* Druggability score bar */}
-        <div className="flex items-center gap-2">
-          <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-paper-deep">
-            <div
-              className="h-full rounded-full bg-accent"
-              style={{ width: `${score * 100}%` }}
-            />
-          </div>
-          <span className="font-mono text-xs text-ink tabular-nums">
-            {pocket.druggability_score.toFixed(2)}
+        {/* Druggability — the headline metric, labelled and ranked */}
+        <div className="flex items-baseline justify-between">
+          <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-muted">
+            Druggability
           </span>
+          <span className="flex items-center gap-2">
+            {isTop && (
+              <span className="rounded-full bg-accent px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.1em] text-paper">
+                Top
+              </span>
+            )}
+            <span className="font-mono text-sm text-ink tabular-nums">
+              {pocket.druggability_score.toFixed(2)}
+            </span>
+          </span>
+        </div>
+        <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-paper-deep">
+          <div className="h-full rounded-full bg-accent" style={{ width: `${score * 100}%` }} />
         </div>
 
         {/* Flags */}
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          {pocket.is_interface_pocket && (
-            <span className="rounded-full bg-accent-soft px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.1em] text-accent">
-              Interface
-            </span>
-          )}
-          {pocket.is_emergent && (
-            <span className="rounded-full bg-conf-verylow/15 px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.1em] text-ink">
-              Emergent
-            </span>
-          )}
-          {pocket.is_conserved && (
-            <span className="rounded-full border border-hairline px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.1em] text-muted">
-              Conserved
-            </span>
-          )}
-        </div>
+        {(pocket.is_interface_pocket || pocket.is_emergent || pocket.is_conserved) && (
+          <div className="mt-2.5 flex flex-wrap gap-1.5">
+            {pocket.is_interface_pocket && (
+              <span className="rounded-full bg-accent-soft px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.1em] text-accent">
+                Interface
+              </span>
+            )}
+            {pocket.is_emergent && (
+              <span className="rounded-full bg-conf-verylow/15 px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.1em] text-ink">
+                Emergent
+              </span>
+            )}
+            {pocket.is_conserved && (
+              <span className="rounded-full border border-hairline px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.1em] text-muted">
+                Conserved
+              </span>
+            )}
+          </div>
+        )}
 
-        {/* Metrics */}
-        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[11px] text-muted">
-          <span>{pocket.volume.toFixed(0)} Å³</span>
-          {pocket.avg_plddt > 0 && (
-            <span className="inline-flex items-center gap-1.5">
-              <span
-                className="h-2 w-2 rounded-full"
-                style={{ backgroundColor: plddtBand(pocket.avg_plddt).color }}
-              />
-              pLDDT {pocket.avg_plddt.toFixed(1)}
+        {/* Every fpocket metric, labelled */}
+        <div className="mt-3 grid grid-cols-3 gap-x-4 gap-y-2.5">
+          <Stat label="Volume Å³" value={pocket.volume.toFixed(0)} />
+          <Stat label="Surface Å²" value={pocket.surface_area.toFixed(0)} />
+          <Stat label="Depth Å" value={pocket.depth.toFixed(1)} />
+          <Stat label="Hydrophobicity" value={pocket.hydrophobicity.toFixed(1)} />
+          <Stat label="Polarity" value={pocket.polarity.toFixed(1)} />
+          <div className="flex flex-col gap-0.5">
+            <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-muted">
+              Avg pLDDT
             </span>
-          )}
-          <span>{residues} residues</span>
+            <span className="inline-flex items-center gap-1.5 font-mono text-xs text-ink tabular-nums">
+              {pocket.avg_plddt > 0 ? (
+                <>
+                  <span
+                    className="h-2 w-2 rounded-full"
+                    style={{ backgroundColor: plddtBand(pocket.avg_plddt).color }}
+                  />
+                  {pocket.avg_plddt.toFixed(1)}
+                </>
+              ) : (
+                '—'
+              )}
+            </span>
+          </div>
+          <Stat label="Residues" value={String(residues)} />
           {pocket.chains && pocket.chains.length > 0 && (
-            <span>chains {pocket.chains.join('/')}</span>
+            <Stat label="Chains" value={pocket.chains.join(' / ')} />
           )}
         </div>
       </div>
@@ -77,21 +139,45 @@ function PocketRow({ pocket }: { pocket: Pocket }) {
   )
 }
 
-function PocketColumn({ title, pockets }: { title: string; pockets: Pocket[] }) {
+/** Sort a copy of the pockets by druggability, most druggable first. */
+function byDruggability(pockets: Pocket[]): Pocket[] {
+  return [...pockets].sort((a, b) => b.druggability_score - a.druggability_score)
+}
+
+function PocketColumn({
+  title,
+  pockets,
+  selectedKey,
+  onSelect,
+}: {
+  title: string
+  pockets: Pocket[]
+  selectedKey: string | null
+  onSelect: (p: Pocket) => void
+}) {
+  const sorted = byDruggability(pockets)
   return (
     <div className="min-w-0 flex-1">
       <div className="flex items-baseline justify-between border-b border-hairline pb-2">
         <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-ink">
           {title}
         </span>
-        <span className="font-mono text-[11px] text-muted">{pockets.length}</span>
+        <span className="font-mono text-[11px] text-muted">
+          {sorted.length} · by druggability
+        </span>
       </div>
-      {pockets.length === 0 ? (
+      {sorted.length === 0 ? (
         <p className="py-4 font-mono text-xs text-muted">No pockets.</p>
       ) : (
         <ul>
-          {pockets.map((p) => (
-            <PocketRow key={`${p.source_type}-${p.pocket_id}`} pocket={p} />
+          {sorted.map((p, i) => (
+            <PocketRow
+              key={pocketKey(p)}
+              pocket={p}
+              rank={i}
+              active={selectedKey === pocketKey(p)}
+              onSelect={onSelect}
+            />
           ))}
         </ul>
       )}
@@ -108,10 +194,14 @@ export default function BindingSitesPanel({
   status,
   result,
   error,
+  selectedKey,
+  onSelect,
 }: {
   status: Status
   result: BindingSiteResult | null
   error: string | null
+  selectedKey: string | null
+  onSelect: (p: Pocket) => void
 }) {
   return (
     <section className="mx-auto w-full max-w-5xl px-6 py-8">
@@ -155,8 +245,18 @@ export default function BindingSitesPanel({
             </p>
           ) : (
             <div className="mt-6 flex flex-col gap-8 sm:flex-row sm:gap-10">
-              <PocketColumn title="Dimer · complex" pockets={result.pockets} />
-              <PocketColumn title="Monomer" pockets={result.monomer_pockets} />
+              <PocketColumn
+                title="Dimer · complex"
+                pockets={result.pockets}
+                selectedKey={selectedKey}
+                onSelect={onSelect}
+              />
+              <PocketColumn
+                title="Monomer"
+                pockets={result.monomer_pockets}
+                selectedKey={selectedKey}
+                onSelect={onSelect}
+              />
             </div>
           )}
         </>

@@ -1,10 +1,17 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import type { BindingSiteResult, Complex } from '../lib/api'
+import type { BindingSiteResult, Complex, Pocket } from '../lib/api'
 import { getBindingSites, getComplex } from '../lib/api'
 import { plddtBands } from '../lib/plddt'
-import MolstarViewer from '../components/viewer/MolstarViewer'
-import BindingSitesPanel from '../components/viewer/BindingSitesPanel'
+import MolstarViewer, { type HighlightResidue } from '../components/viewer/MolstarViewer'
+import BindingSitesPanel, { pocketKey } from '../components/viewer/BindingSitesPanel'
+
+/** Pair each residue index with its chain into Mol* highlight targets. */
+function pocketResidues(pocket: Pocket): HighlightResidue[] {
+  const indices = pocket.residue_indices ?? []
+  const chains = pocket.residue_chains ?? []
+  return indices.map((index, i) => ({ chain: chains[i] ?? chains[0] ?? '', index }))
+}
 
 const REPRESENTATIONS = [
   { label: 'Spheres', value: 'spacefill' },
@@ -24,11 +31,13 @@ function StructurePanel({
   label,
   plddt,
   representation,
+  highlight,
 }: {
   url?: string
   label: string
   plddt?: number
   representation: string
+  highlight?: HighlightResidue[]
 }) {
   if (!url) {
     return (
@@ -44,7 +53,15 @@ function StructurePanel({
       </div>
     )
   }
-  return <MolstarViewer url={url} label={label} plddt={plddt} representation={representation} />
+  return (
+    <MolstarViewer
+      url={url}
+      label={label}
+      plddt={plddt}
+      representation={representation}
+      highlight={highlight}
+    />
+  )
 }
 
 /**
@@ -64,6 +81,26 @@ export default function ComplexViewerPage() {
   const [bsStatus, setBsStatus] = useState<BsStatus>('loading')
   const [bsError, setBsError] = useState<string | null>(null)
 
+  // Selected pocket — clicking a row highlights it in the matching viewer.
+  const [selectedPocket, setSelectedPocket] = useState<Pocket | null>(null)
+  const selectedKey = selectedPocket ? pocketKey(selectedPocket) : null
+
+  // Toggle selection off when the same pocket is clicked again.
+  const handleSelect = (p: Pocket) =>
+    setSelectedPocket((prev) => (prev && pocketKey(prev) === pocketKey(p) ? null : p))
+
+  // A monomer pocket highlights the monomer viewer; anything else (dimer /
+  // interface) highlights the dimer viewer. Empty array clears the other one.
+  const isMonomer = selectedPocket?.source_type === 'monomer'
+  const monomerHighlight = useMemo<HighlightResidue[]>(
+    () => (selectedPocket && isMonomer ? pocketResidues(selectedPocket) : []),
+    [selectedPocket, isMonomer],
+  )
+  const dimerHighlight = useMemo<HighlightResidue[]>(
+    () => (selectedPocket && !isMonomer ? pocketResidues(selectedPocket) : []),
+    [selectedPocket, isMonomer],
+  )
+
   // Metadata (fast) and fpocket analysis (slow) load in parallel on mount.
   useEffect(() => {
     const ctrl = new AbortController()
@@ -78,6 +115,7 @@ export default function ComplexViewerPage() {
         }
       })
 
+    setSelectedPocket(null)
     setBs(null)
     setBsError(null)
     setBsStatus('loading')
@@ -174,6 +212,7 @@ export default function ComplexViewerPage() {
                       label="Monomer · single chain"
                       plddt={complex.monomer_plddt_avg}
                       representation={representation}
+                      highlight={monomerHighlight}
                     />
                   </div>
                   <div className="flex min-h-0 flex-1 flex-col">
@@ -182,6 +221,7 @@ export default function ComplexViewerPage() {
                       label="Dimer · complex"
                       plddt={complex.dimer_plddt_avg}
                       representation={representation}
+                      highlight={dimerHighlight}
                     />
                   </div>
                 </div>
@@ -206,7 +246,13 @@ export default function ComplexViewerPage() {
           </section>
 
           {/* fpocket analysis */}
-          <BindingSitesPanel status={bsStatus} result={bs} error={bsError} />
+          <BindingSitesPanel
+            status={bsStatus}
+            result={bs}
+            error={bsError}
+            selectedKey={selectedKey}
+            onSelect={handleSelect}
+          />
         </>
       )}
     </div>
