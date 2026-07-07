@@ -1,65 +1,13 @@
-import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
-import type { Complex, SearchSource } from '../lib/api'
-import { searchComplexes, checkHealth } from '../lib/api'
+import { useSearch } from '../lib/searchStore'
 import ComplexCard from './ComplexCard'
-
-type Status = 'idle' | 'searching' | 'done' | 'error'
 
 const examples = ['TP53', 'Aurora kinase', 'EGFR', 'beta-lactamase']
 
-// Rank by dimer confidence — highest-confidence structures first.
-function rank(a: Complex, b: Complex) {
-  return b.dimer_plddt_avg - a.dimer_plddt_avg
-}
-
 export default function TargetSearch() {
-  const [query, setQuery] = useState('')
-  const [results, setResults] = useState<Complex[]>([])
-  const [status, setStatus] = useState<Status>('idle')
-  const [source, setSource] = useState<SearchSource | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [online, setOnline] = useState<boolean | null>(null)
-
-  const cancelRef = useRef<(() => void) | null>(null)
-
-  // Probe the backend once so we can tell the user if it's down.
-  useEffect(() => {
-    const ctrl = new AbortController()
-    checkHealth(ctrl.signal).then(setOnline)
-    return () => {
-      ctrl.abort()
-      cancelRef.current?.()
-    }
-  }, [])
-
-  function run(q: string) {
-    const trimmed = q.trim()
-    if (!trimmed) return
-    cancelRef.current?.()
-
-    setResults([])
-    setError(null)
-    setSource(null)
-    setStatus('searching')
-
-    const seen = new Set<string>()
-    cancelRef.current = searchComplexes(trimmed, {
-      onResult: (complex) => {
-        if (seen.has(complex.uniprot_id)) return
-        seen.add(complex.uniprot_id)
-        setResults((prev) => [...prev, complex].sort(rank))
-      },
-      onDone: (src) => {
-        setSource(src)
-        setStatus('done')
-      },
-      onError: (message) => {
-        setError(message)
-        setStatus('error')
-      },
-    })
-  }
+  // State lives in the SearchProvider (above the router) so results survive
+  // navigating to a structure page and back.
+  const { query, setQuery, results, status, source, error, online, run } = useSearch()
 
   function onSubmit(e: FormEvent) {
     e.preventDefault()
