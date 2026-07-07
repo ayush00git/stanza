@@ -20,5 +20,9 @@ func main() {
 	r.GET("/search", handlers.SearchHandler)
 	r.GET("/complex/:id", handlers.ComplexDetailHandler)
 
+	// fpocket binding-site analysis: runs fpocket on the monomer and dimer
+	// structures and returns detected pockets with a monomer/dimer comparison.
+	r.GET("/complex/:id/binding-sites", handlers.BindingSiteHandler)
+
 	r.Run(":8080")
 }
