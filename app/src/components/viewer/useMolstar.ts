@@ -19,8 +19,9 @@ import 'molstar/lib/mol-plugin-ui/skin/light.scss'
 const VIEWER_BG = 0xf3f6f9
 // Hover/selection accent — the assay-blue from the theme (var(--color-accent)).
 const HIGHLIGHT = 0x1a56db
-// Overpaint color used to mark a selected pocket's residues — same accent blue.
-const ACCENT = 0x1a56db
+// Overpaint color used to mark a selected pocket's residues — a persistent
+// green so the highlight stays visible until the selection changes.
+const ACCENT = 0x16a34a
 
 /** One residue to spotlight: its chain id and residue sequence number. */
 export interface HighlightResidue {
@@ -211,6 +212,10 @@ export function useMolstar({
 /**
  * Build a Mol* element Loci for the given (chain, residue-number) pairs.
  *
+ * Residue-indexing assumption: fpocket's `residue_indices` are PDB residue
+ * numbers, which equal the mmCIF `auth_seq_id` (1-based). We use them verbatim
+ * — no off-by-one shift is applied. Chain ids map to `auth_asym_id`.
+ *
  * fpocket reports PDB residue numbers, which map to mmCIF `auth_seq_id`, and
  * chain ids that map to `auth_asym_id`. For AlphaFold models these coincide
  * with the 1-based sequence position and the single-letter chain. We group the
@@ -238,8 +243,10 @@ function buildResidueLoci(structure: any, highlight: HighlightResidue[]) {
 }
 
 /**
- * Overpaint the selected pocket's residues in the accent color and focus the
- * camera on them. Passing an empty highlight clears any existing overpaint.
+ * Overpaint the selected pocket's residues in a persistent green and focus the
+ * camera on them. The overpaint is the only highlight — it stays applied until
+ * the highlight changes (no transient hover-style highlight is used). Passing
+ * an empty/undefined highlight clears any existing overpaint.
  */
 async function applyHighlight(plugin: any, highlight: HighlightResidue[] | undefined) {
   try {
@@ -252,9 +259,9 @@ async function applyHighlight(plugin: any, highlight: HighlightResidue[] | undef
     }
     if (components.length === 0) return
 
-    // Always clear the previous highlight first.
+    // Always clear the previous overpaint first; when the highlight is empty or
+    // undefined this also serves to remove the highlight entirely.
     await clearStructureOverpaint(plugin, components)
-    plugin.managers.interactivity.lociHighlights.clearHighlights()
 
     if (!highlight || highlight.length === 0) return
 
@@ -271,7 +278,6 @@ async function applyHighlight(plugin: any, highlight: HighlightResidue[] | undef
       const loci = buildResidueLoci(root, highlight)
       if (!StructureElement.Loci.isEmpty(loci)) {
         plugin.managers.camera.focusLoci(loci)
-        plugin.managers.interactivity.lociHighlights.highlightOnly({ loci })
       }
     }
   } catch (err) {
