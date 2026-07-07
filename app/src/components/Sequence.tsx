@@ -1,14 +1,4 @@
-/** AlphaFold pLDDT confidence bands, official colour scale. */
-const bands = [
-  { label: 'Very high', min: 90, color: 'var(--color-conf-veryhigh)' },
-  { label: 'Confident', min: 70, color: 'var(--color-conf-confident)' },
-  { label: 'Low', min: 50, color: 'var(--color-conf-low)' },
-  { label: 'Very low', min: 0, color: 'var(--color-conf-verylow)' },
-]
-
-function bandFor(plddt: number) {
-  return bands.find((b) => plddt >= b.min) ?? bands[bands.length - 1]
-}
+import { plddtBands, plddtBand } from '../lib/plddt'
 
 type SequenceProps = {
   /** Single-letter amino-acid codes. */
@@ -49,7 +39,7 @@ export default function Sequence({
               </span>
               <span
                 className="mt-1.5 h-1 w-3.5 rounded-full"
-                style={{ backgroundColor: bandFor(confidence[i] ?? 0).color }}
+                style={{ backgroundColor: plddtBand(confidence[i] ?? 0).color }}
               />
               <span className="mt-1 h-3 font-mono text-[10px] leading-none text-muted tabular-nums">
                 {tick ? pos : ''}
@@ -64,7 +54,7 @@ export default function Sequence({
           <span className="font-mono text-[11px] uppercase tracking-[0.15em] text-muted">
             pLDDT
           </span>
-          {bands.map((band) => (
+          {plddtBands.map((band) => (
             <span
               key={band.label}
               className="flex items-center gap-1.5 text-[11px] text-muted"
