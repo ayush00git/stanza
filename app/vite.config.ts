@@ -14,6 +14,8 @@ export default defineConfig({
       '/health': apiTarget,
       '/search': apiTarget,
       '/complex': apiTarget,
+      '/chembl': apiTarget,
+      '/dock': apiTarget,
     },
   },
 })

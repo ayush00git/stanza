@@ -6,6 +6,9 @@
  *   GET /search?q=...                -> Server-Sent Events stream of Complex results
  *   GET /complex/:id                 -> a single Complex (id = UniProt or AlphaFold ID)
  *   GET /complex/:id/binding-sites   -> fpocket BindingSiteResult (monomer + dimer)
+ *   GET /chembl?pocket_id=...        -> Fragment[] candidate ligands for a pocket
+ *   POST /dock                       -> { job_id } (202 Accepted; docking runs async)
+ *   GET /dock/status?id=...          -> DockingResult (poll until status is done/error)
  */
 
 /** Mirrors models.Complex (JSON tags) from the Go backend. */
@@ -188,6 +191,144 @@ export async function getBindingSites(
     throw new Error(body.error ?? `Binding-site analysis failed (${res.status})`)
   }
   return (await res.json()) as BindingSiteResult
+}
+
+/**
+ * A candidate small molecule suggested from ChEMBL for a pocket.
+ * Mirrors models.Fragment (JSON tags) from the Go backend.
+ */
+export type Fragment = {
+  chembl_id: string
+  name: string
+  smiles: string
+  mol_weight: number
+  logp: number
+  similarity_score: number
+}
+
+/**
+ * Fetch candidate ChEMBL fragments for a pocket. The backend maps pocket
+ * geometry/chemistry (volume, hydrophobicity, polarity) onto ChEMBL molecule
+ * filters, so pass overrides straight from the binding-site table row. The
+ * pocket must already exist in the server-side pocket store (i.e. binding-site
+ * analysis has been run for the complex) or the request 404s.
+ *
+ * Wraps GET /chembl?pocket_id=<int>&source_type=<monomer|dimer>&volume&hydrophobicity&polarity
+ */
+export async function getChemblFragments(
+  pocketId: number,
+  opts?: {
+    sourceType?: string
+    volume?: number
+    hydrophobicity?: number
+    polarity?: number
+    signal?: AbortSignal
+  },
+): Promise<Fragment[]> {
+  const params = new URLSearchParams({ pocket_id: String(pocketId) })
+  if (opts?.sourceType) params.set('source_type', opts.sourceType)
+  if (opts?.volume != null) params.set('volume', String(opts.volume))
+  if (opts?.hydrophobicity != null)
+    params.set('hydrophobicity', String(opts.hydrophobicity))
+  if (opts?.polarity != null) params.set('polarity', String(opts.polarity))
+
+  const res = await fetch(`/chembl?${params.toString()}`, {
+    signal: opts?.signal,
+  })
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string }
+    throw new Error(body.error ?? `ChEMBL fragment lookup failed (${res.status})`)
+  }
+  return (await res.json()) as Fragment[]
+}
+
+/**
+ * Body for POST /dock. Mirrors the handler's dockPOSTBody. `pocket_id` and
+ * `ligand_smiles` are required; supply either `protein_pdb_path` (a local path
+ * or URL) or `protein_pdb_id`. `source_type` defaults to "dimer" server-side.
+ */
+export type DockSubmitRequest = {
+  pocket_id: number
+  ligand_smiles: string
+  source_type?: string
+  protein_pdb_path?: string
+  protein_pdb_id?: string
+}
+
+/** Response from POST /dock (HTTP 202): the async job identifier to poll. */
+export type DockSubmitResponse = {
+  job_id: string
+}
+
+/** Terminal + in-flight states of a docking job. Mirrors DockingResult.Status. */
+export type DockStatus = 'pending' | 'running' | 'done' | 'error'
+
+/** One binding pose returned by Vina. Mirrors services.Conformation. */
+export type Conformation = {
+  mode: number
+  binding_affinity: number
+  rmsd_lb: number
+  rmsd_ub: number
+  pose_pdb: string
+}
+
+/**
+ * Status + output of a docking job. Mirrors services.DockingResult.
+ * While in flight, `status` is 'pending' or 'running' and the result fields are
+ * zero-valued; on 'done' `binding_affinity`/`pose_pdb` are populated; on 'error'
+ * `error` holds the failure message.
+ */
+export type DockingResult = {
+  job_id: string
+  pocket_id: number
+  status: DockStatus
+  binding_affinity: number
+  pose_pdb: string
+  error?: string
+  conformations?: Conformation[]
+}
+
+/**
+ * Submit an asynchronous docking job (SMILES ligand vs. a pocket). Resolves with
+ * the job id (HTTP 202); poll getDockStatus with it until the job finishes.
+ *
+ * Wraps POST /dock with a JSON body.
+ */
+export async function submitDock(
+  req: DockSubmitRequest,
+  signal?: AbortSignal,
+): Promise<DockSubmitResponse> {
+  const res = await fetch('/dock', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+    signal,
+  })
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string }
+    throw new Error(body.error ?? `Docking submission failed (${res.status})`)
+  }
+  return (await res.json()) as DockSubmitResponse
+}
+
+/**
+ * Fetch the current status of a docking job. Poll this until `status` is 'done'
+ * or 'error'.
+ *
+ * Wraps GET /dock/status?id=<jobID>.
+ */
+export async function getDockStatus(
+  jobId: string,
+  signal?: AbortSignal,
+): Promise<DockingResult> {
+  const res = await fetch(`/dock/status?id=${encodeURIComponent(jobId)}`, {
+    signal,
+  })
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string }
+    throw new Error(body.error ?? `Docking status lookup failed (${res.status})`)
+  }
+  return (await res.json()) as DockingResult
 }
 
 /** Ping the backend. Resolves true when the API is reachable and healthy. */
