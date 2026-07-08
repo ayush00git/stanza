@@ -119,6 +119,8 @@ export default function ComplexViewerPage() {
   const [error, setError] = useState<string | null>(null)
   const [representation, setRepresentation] = useState(DEFAULT_REPRESENTATION)
   const [structuresOpen, setStructuresOpen] = useState(true)
+  // Full-screen mode: a single viewer, both side by side, or none.
+  const [fullscreen, setFullscreen] = useState<'monomer' | 'dimer' | 'both' | null>(null)
 
   // fpocket analysis lifecycle — kept fully separate from the structure load
   // so the viewers never wait on this (slow) request.
@@ -249,6 +251,24 @@ export default function ComplexViewerPage() {
     return () => ctrl.abort()
   }, [id])
 
+  // Full-screen: exit on Escape, and nudge Mol* to resize its canvas whenever
+  // the mode changes (the viewer containers change size but the window doesn't).
+  useEffect(() => {
+    const raf = requestAnimationFrame(() => window.dispatchEvent(new Event('resize')))
+    const t = setTimeout(() => window.dispatchEvent(new Event('resize')), 150)
+    if (!fullscreen) return () => { cancelAnimationFrame(raf); clearTimeout(t) }
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setFullscreen(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => {
+      cancelAnimationFrame(raf)
+      clearTimeout(t)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [fullscreen])
+
   // Metadata fields for the header strip — only rendered when present.
   const metaItems = useMemo(() => {
     if (!complex) return []
@@ -338,21 +358,44 @@ export default function ComplexViewerPage() {
               </button>
 
               {structuresOpen && (
-                <div className="flex flex-wrap rounded-md border border-hairline bg-paper-deep p-0.5">
-                  {REPRESENTATIONS.map((opt) => (
-                    <button
-                      key={opt.value}
-                      type="button"
-                      onClick={() => setRepresentation(opt.value)}
-                      className={`rounded px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.1em] transition-colors ${
-                        representation === opt.value
-                          ? 'bg-paper text-ink shadow-[0_1px_2px_rgba(18,22,28,0.12)]'
-                          : 'text-muted hover:text-ink'
-                      }`}
-                    >
-                      {opt.label}
-                    </button>
-                  ))}
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex flex-wrap rounded-md border border-hairline bg-paper-deep p-0.5">
+                    {REPRESENTATIONS.map((opt) => (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        onClick={() => setRepresentation(opt.value)}
+                        className={`rounded px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.1em] transition-colors ${
+                          representation === opt.value
+                            ? 'bg-paper text-ink shadow-[0_1px_2px_rgba(18,22,28,0.12)]'
+                            : 'text-muted hover:text-ink'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Full-screen: each viewer on its own, or both side by side. */}
+                  <div className="flex flex-wrap rounded-md border border-hairline bg-paper-deep p-0.5">
+                    {(
+                      [
+                        ['monomer', 'Monomer'],
+                        ['dimer', 'Dimer'],
+                        ['both', 'Both'],
+                      ] as const
+                    ).map(([mode, label]) => (
+                      <button
+                        key={mode}
+                        type="button"
+                        onClick={() => setFullscreen(mode)}
+                        className="rounded px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.1em] text-muted transition-colors hover:text-ink"
+                        title={`Full screen — ${label}`}
+                      >
+                        {label} ⤢
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
@@ -361,8 +404,22 @@ export default function ComplexViewerPage() {
               <div className="mt-4 flex flex-col overflow-hidden rounded-lg border border-hairline bg-paper-deep">
                 {/* Comfortable, side-by-side on md+, stacked on small screens.
                     Each viewer manages its own loading state internally. */}
-                <div className="flex min-h-[420px] flex-col md:h-[56vh] md:min-h-[460px] md:flex-row">
-                  <div className="flex min-h-[360px] flex-1 flex-col border-hairline max-md:border-b md:min-h-0 md:border-r">
+                <div
+                  className={`flex min-h-[420px] flex-col md:h-[56vh] md:min-h-[460px] md:flex-row ${
+                    fullscreen === 'both'
+                      ? '!fixed !inset-0 !z-50 !h-screen !min-h-0 !max-h-none !flex-row bg-paper-deep'
+                      : ''
+                  }`}
+                >
+                  <div
+                    className={`relative flex min-h-[360px] flex-1 flex-col border-hairline max-md:border-b md:min-h-0 md:border-r ${
+                      fullscreen === 'monomer'
+                        ? '!fixed !inset-0 !z-50 !min-h-0 bg-paper-deep'
+                        : fullscreen === 'dimer'
+                          ? 'hidden'
+                          : ''
+                    }`}
+                  >
                     <StructurePanel
                       url={complex.monomer_structure_url}
                       label="Monomer · single chain"
@@ -375,7 +432,15 @@ export default function ComplexViewerPage() {
                       <PoseCaption pose={active} onClear={() => setActiveKey(null)} />
                     )}
                   </div>
-                  <div className="flex min-h-[360px] flex-1 flex-col md:min-h-0">
+                  <div
+                    className={`relative flex min-h-[360px] flex-1 flex-col md:min-h-0 ${
+                      fullscreen === 'dimer'
+                        ? '!fixed !inset-0 !z-50 !min-h-0 bg-paper-deep'
+                        : fullscreen === 'monomer'
+                          ? 'hidden'
+                          : ''
+                    }`}
+                  >
                     <StructurePanel
                       url={complex.complex_structure_url}
                       label="Dimer · complex"
@@ -406,6 +471,17 @@ export default function ComplexViewerPage() {
                   ))}
                 </div>
               </div>
+            )}
+
+            {/* Exit control, floating above any full-screen overlay. */}
+            {fullscreen && (
+              <button
+                type="button"
+                onClick={() => setFullscreen(null)}
+                className="fixed right-4 top-4 z-[60] rounded-md border border-hairline bg-paper/90 px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.1em] text-ink shadow-sm backdrop-blur-sm transition-colors hover:text-accent"
+              >
+                ✕ Exit full screen
+              </button>
             )}
           </section>
 
