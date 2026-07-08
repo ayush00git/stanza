@@ -1,0 +1,7 @@
+# Python dependencies for the Stage-2 mutagenesis helper (scripts/mutate.py).
+# Install with:  pip install -r scripts/requirements.txt
+#
+# The Go backend shells out to `python3 scripts/mutate.py` to apply a single
+# side-chain point mutation with PDBFixer. These are the only runtime deps.
+openmm
+pdbfixer

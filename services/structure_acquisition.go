@@ -46,7 +46,11 @@ func AcquireWTStructure(ctx context.Context, uniprotID string, mutation models.M
 			StructureURL: af.MonomerCifURL,
 			Chain:        "A",
 			LigandCount:  0,
-			Notes:        notes,
+			// AlphaFold models use UniProt (1-based) numbering on chain A, so the
+			// mutated residue sits at its UniProt position with no remapping.
+			TargetChain:     "A",
+			TargetAuthSeqID: mutation.Position,
+			Notes:           notes,
 		}
 	}
 

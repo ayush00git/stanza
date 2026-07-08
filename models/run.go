@@ -33,19 +33,35 @@ type WTStructure struct {
 	Chain           string            `json:"chain,omitempty"`
 	LigandCount     int               `json:"ligand_count"`
 	Resolution      float64           `json:"resolution,omitempty"`
-	ResidueResolved bool              `json:"residue_resolved"`  // mutated position present in this structure
-	WildTypeMatches bool              `json:"wild_type_matches"` // residue at position == Mutation.WildType
+	ResidueResolved bool              `json:"residue_resolved"`             // mutated position present in this structure
+	WildTypeMatches bool              `json:"wild_type_matches"`            // residue at position == Mutation.WildType
+	TargetChain     string            `json:"target_chain,omitempty"`       // auth chain of the mutated residue in this structure
+	TargetAuthSeqID int               `json:"target_auth_seq_id,omitempty"` // auth residue number of the mutated residue in this structure
 	Notes           []string          `json:"notes,omitempty"`
+}
+
+// MutagenesisResult is the Stage-2 output: a matched WT/mutant structure pair
+// built from the acquired base structure by side-chain mutagenesis.
+type MutagenesisResult struct {
+	Tool               string   `json:"tool"`                 // e.g. "pdbfixer"
+	WTStructureURL     string   `json:"wt_structure_url"`     // served WT-normalized structure
+	MutantStructureURL string   `json:"mutant_structure_url"` // served mutant structure
+	TargetChain        string   `json:"target_chain"`
+	TargetResidueNum   int      `json:"target_residue_number"`
+	WildTypeResidue    string   `json:"wild_type_residue"` // 3-letter, e.g. "GLY"
+	MutantResidue      string   `json:"mutant_residue"`    // 3-letter, e.g. "CYS"
+	Notes              []string `json:"notes,omitempty"`
 }
 
 // Run is a resistance-design run. Stage 1 populates WTStructure.
 type Run struct {
-	ID          string       `json:"id"`
-	UniprotID   string       `json:"uniprot_id"`
-	Mutation    Mutation     `json:"mutation"`
-	SiteHint    string       `json:"site_hint,omitempty"`
-	Status      string       `json:"status"` // "structure_acquired" | "error"
-	WTStructure *WTStructure `json:"wt_structure,omitempty"`
-	Error       string       `json:"error,omitempty"`
-	CreatedAt   string       `json:"created_at"`
+	ID          string             `json:"id"`
+	UniprotID   string             `json:"uniprot_id"`
+	Mutation    Mutation           `json:"mutation"`
+	SiteHint    string             `json:"site_hint,omitempty"`
+	Status      string             `json:"status"` // "structure_acquired" | "error"
+	WTStructure *WTStructure       `json:"wt_structure,omitempty"`
+	Mutagenesis *MutagenesisResult `json:"mutagenesis,omitempty"`
+	Error       string             `json:"error,omitempty"`
+	CreatedAt   string             `json:"created_at"`
 }
