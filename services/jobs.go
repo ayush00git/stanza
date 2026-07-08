@@ -85,7 +85,10 @@ func (s *JobStore) runJob(ctx context.Context, jobID string, pocket models.Pocke
 	// 2b. Download protein if URL
 	localProteinPath := proteinPDBPath
 	if isURL(proteinPDBPath) {
-		localProteinPath = filepath.Join(tmpDir, "receptor.pdb")
+		// Keep the source extension so OpenBabel infers the right input format.
+		// AlphaFold serves mmCIF; saving it as .pdb makes obabel reject it as an
+		// invalid PDB and the whole dock fails.
+		localProteinPath = filepath.Join(tmpDir, "receptor"+structureExt(proteinPDBPath))
 		if err := downloadFile(ctx, proteinPDBPath, localProteinPath); err != nil {
 			s.updateError(jobID, fmt.Errorf("failed to download protein for docking: %w", err))
 			return
@@ -184,6 +187,20 @@ func (s *JobStore) evictIfNeededLocked(maxLen int) {
 
 func isURL(s string) bool {
 	return strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://")
+}
+
+// structureExt returns the receptor file extension (".cif" or ".pdb") implied
+// by a URL, ignoring any query string, so the downloaded file is named in a way
+// OpenBabel can parse. Defaults to ".pdb" for unrecognised paths.
+func structureExt(u string) string {
+	lu := strings.ToLower(u)
+	if i := strings.IndexByte(lu, '?'); i >= 0 {
+		lu = lu[:i]
+	}
+	if strings.HasSuffix(lu, ".cif") || strings.HasSuffix(lu, ".mmcif") {
+		return ".cif"
+	}
+	return ".pdb"
 }
 
 func downloadFile(ctx context.Context, url, dest string) error {
