@@ -53,6 +53,17 @@ type MutagenesisResult struct {
 	Notes              []string `json:"notes,omitempty"`
 }
 
+// PocketAnalysis is the Stage-3 result for a run: pockets detected on both tracks,
+// their cross-track match counts, and the resistance-pocket context for the loop.
+type PocketAnalysis struct {
+	WTPockets      []Pocket             `json:"wt_pockets"`
+	MutantPockets  []Pocket             `json:"mutant_pockets"`
+	ConservedCount int                  `json:"conserved_count"`
+	WTOnlyCount    int                  `json:"wt_only_count"`
+	EmergentCount  int                  `json:"emergent_count"`
+	Context        *MutantPocketContext `json:"context,omitempty"`
+}
+
 // Run is a resistance-design run. Stage 1 populates WTStructure.
 type Run struct {
 	ID          string             `json:"id"`
@@ -62,6 +73,7 @@ type Run struct {
 	Status      string             `json:"status"` // "structure_acquired" | "error"
 	WTStructure *WTStructure       `json:"wt_structure,omitempty"`
 	Mutagenesis *MutagenesisResult `json:"mutagenesis,omitempty"`
+	Pockets     *PocketAnalysis    `json:"pockets,omitempty"`
 	Error       string             `json:"error,omitempty"`
 	CreatedAt   string             `json:"created_at"`
 }

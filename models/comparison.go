@@ -72,3 +72,32 @@ type ComparisonResult struct {
 	StabilizationStats StabilizationStats       `json:"stabilization_stats"`
 	FragmentComparison FragmentComparison       `json:"fragment_comparison"`
 }
+
+// MutantPocketContext is the resistance-pocket payload the generation loop reads.
+type MutantPocketContext struct {
+	MutantPocket MutantPocket `json:"mutant_pocket"`
+	PocketDelta  PocketDelta  `json:"pocket_delta"`
+}
+
+// MutantPocket is the pocket the pipeline designs against (mutant track).
+type MutantPocket struct {
+	KeyResidues    []string   `json:"key_residues"` // e.g. ["Met790","Leu718"]
+	Volume         float64    `json:"volume"`
+	Hydrophobicity float64    `json:"hydrophobicity"`
+	Polarity       float64    `json:"polarity,omitempty"`
+	Center         [3]float64 `json:"center"` // docking-box seed
+	PocketID       int        `json:"pocket_id"`
+}
+
+// PocketDelta is what the mutation changed, WT -> mutant, for the resistance pocket.
+type PocketDelta struct {
+	Changed         []string `json:"changed"` // e.g. ["Thr790->Met790"]
+	ResiduesGained  []string `json:"residues_gained,omitempty"`
+	ResiduesLost    []string `json:"residues_lost,omitempty"`
+	DVolume         float64  `json:"d_volume"`
+	DHydrophobicity float64  `json:"d_hydrophobicity"`
+	DPolarity       float64  `json:"d_polarity"`
+	HBondsGained    []string `json:"hbonds_gained,omitempty"`
+	HBondsLost      []string `json:"hbonds_lost,omitempty"`
+	Effect          string   `json:"effect"` // one-line summary
+}
