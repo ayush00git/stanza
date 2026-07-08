@@ -8,3 +8,6 @@
 
 # fpocket / server scratch output
 /tmp/
+
+# Local-only architecture notes (not committed)
+/stanza_architecture.md
