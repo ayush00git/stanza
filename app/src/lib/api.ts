@@ -6,6 +6,7 @@
  *   GET /search?q=...                -> Server-Sent Events stream of Complex results
  *   GET /complex/:id                 -> a single Complex (id = UniProt or AlphaFold ID)
  *   GET /complex/:id/binding-sites   -> fpocket BindingSiteResult (monomer + dimer)
+ *   GET /complex/:id/drugs           -> DrugCoverage (ChEMBL drug count + known drugs)
  *   GET /chembl?pocket_id=...        -> Fragment[] candidate ligands for a pocket
  *   POST /dock                       -> { job_id } (202 Accepted; docking runs async)
  *   GET /dock/status?id=...          -> DockingResult (poll until status is done/error)
@@ -174,6 +175,29 @@ export async function getComplex(
   return (await res.json()) as Complex
 }
 
+/** ChEMBL drug coverage for a target. Mirrors the /complex/:id/drugs response. */
+export type DrugCoverage = { drug_count: number; known_drug_names: string[] }
+
+/**
+ * Fetch ChEMBL drug coverage for a complex. This is slow — the backend
+ * paginates through every activity page for the target — so it's kept separate
+ * from getComplex and fetched lazily; the structure page renders without it and
+ * fills the drug info in once this resolves.
+ *
+ * Wraps GET /complex/:id/drugs.
+ */
+export async function getDrugCoverage(
+  id: string,
+  signal?: AbortSignal,
+): Promise<DrugCoverage> {
+  const res = await fetch(`/complex/${encodeURIComponent(id)}/drugs`, { signal })
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string }
+    throw new Error(body.error ?? `Drug coverage lookup failed (${res.status})`)
+  }
+  return (await res.json()) as DrugCoverage
+}
+
 /**
  * Run fpocket binding-site analysis for a complex. This is slow — the backend
  * downloads the monomer and dimer structures and runs fpocket on each — so
@@ -300,6 +324,8 @@ export type DockedPose = {
   pocket_id: number
   chembl_id?: string
   binding_affinity?: number
+  name?: string
+  smiles?: string
 }
 
 /**

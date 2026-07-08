@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import type { BindingSiteResult, Complex, DockedPose, Pocket } from '../lib/api'
-import { getBindingSites, getComplex } from '../lib/api'
+import { getBindingSites, getComplex, getDrugCoverage } from '../lib/api'
 import { plddtBands } from '../lib/plddt'
 import MolstarViewer, { type HighlightResidue } from '../components/viewer/MolstarViewer'
 import BindingSitesPanel, { pocketKey } from '../components/viewer/BindingSitesPanel'
+import DockedResults, { entryKey } from '../components/viewer/DockedResults'
 
 /** Pair each residue index with its chain into Mol* highlight targets. */
 function pocketResidues(pocket: Pocket): HighlightResidue[] {
@@ -130,10 +131,11 @@ export default function ComplexViewerPage() {
   const [selectedMonomer, setSelectedMonomer] = useState<Pocket | null>(null)
   const [selectedDimer, setSelectedDimer] = useState<Pocket | null>(null)
 
-  // Docked-ligand pose — also per structure, so each viewer shows the pose that
-  // was docked into it.
-  const [monomerPose, setMonomerPose] = useState<DockedPose | null>(null)
-  const [dimerPose, setDimerPose] = useState<DockedPose | null>(null)
+  // Completed docks accumulate into a "recent docks" leaderboard; `activeKey`
+  // points at the one currently shown in 3D. The two viewers derive their pose
+  // from whichever active entry belongs to their structure.
+  const [docked, setDocked] = useState<DockedPose[]>([])
+  const [activeKey, setActiveKey] = useState<string | null>(null)
 
   const selectedKeys = useMemo(() => {
     const keys = new Set<string>()
@@ -149,11 +151,33 @@ export default function ComplexViewerPage() {
     else setSelectedDimer(p)
   }
 
-  // Route a finished docking pose into the viewer for its structure.
+  // Record a finished docking pose: upsert it into the results list (replacing
+  // an earlier dock of the same fragment/pocket) and make it the active pose so
+  // it renders in 3D immediately.
   const handlePose = (pose: DockedPose) => {
-    if (pose.source_type === 'monomer') setMonomerPose(pose)
-    else setDimerPose(pose)
+    const key = entryKey(pose)
+    setDocked((prev) => {
+      const idx = prev.findIndex((e) => entryKey(e) === key)
+      if (idx === -1) return [...prev, pose]
+      const next = prev.slice()
+      next[idx] = pose
+      return next
+    })
+    setActiveKey(key)
   }
+
+  // Remove one result; if it was the active pose, clear the 3D selection too.
+  const handleRemove = (entry: DockedPose) => {
+    const key = entryKey(entry)
+    setDocked((prev) => prev.filter((e) => entryKey(e) !== key))
+    setActiveKey((cur) => (cur === key ? null : cur))
+  }
+
+  // The active result drives both viewers; each takes the pose only when the
+  // active entry belongs to its own structure.
+  const active = docked.find((e) => entryKey(e) === activeKey) ?? null
+  const monomerPose = active?.source_type === 'monomer' ? active.pdb : null
+  const dimerPose = active?.source_type === 'dimer' ? active.pdb : null
 
   // Each structure's selection routes to its own viewer's highlight; an empty
   // array leaves a viewer un-highlighted until one of its pockets is clicked.
@@ -182,10 +206,25 @@ export default function ComplexViewerPage() {
         }
       })
 
+    // Drug coverage is slow (ChEMBL) so it's fetched lazily and merged into the
+    // header once it lands. It never gates the viewers, and a failure is
+    // swallowed — the header simply keeps its "not fetched" state.
+    getDrugCoverage(id, ctrl.signal)
+      .then((d) => {
+        setComplex((prev) =>
+          prev
+            ? { ...prev, drug_count: d.drug_count, known_drug_names: d.known_drug_names }
+            : prev,
+        )
+      })
+      .catch(() => {
+        /* ignore — leave drug_count at its not-fetched sentinel */
+      })
+
     setSelectedMonomer(null)
     setSelectedDimer(null)
-    setMonomerPose(null)
-    setDimerPose(null)
+    setDocked([])
+    setActiveKey(null)
     setBs(null)
     setBsError(null)
     setBsStatus('loading')
@@ -324,10 +363,10 @@ export default function ComplexViewerPage() {
                       plddt={complex.monomer_plddt_avg}
                       representation={representation}
                       highlight={monomerHighlight}
-                      pose={monomerPose?.pdb ?? null}
+                      pose={monomerPose}
                     />
-                    {monomerPose && (
-                      <PoseCaption pose={monomerPose} onClear={() => setMonomerPose(null)} />
+                    {active?.source_type === 'monomer' && (
+                      <PoseCaption pose={active} onClear={() => setActiveKey(null)} />
                     )}
                   </div>
                   <div className="flex min-h-[360px] flex-1 flex-col md:min-h-0">
@@ -337,10 +376,10 @@ export default function ComplexViewerPage() {
                       plddt={complex.dimer_plddt_avg}
                       representation={representation}
                       highlight={dimerHighlight}
-                      pose={dimerPose?.pdb ?? null}
+                      pose={dimerPose}
                     />
-                    {dimerPose && (
-                      <PoseCaption pose={dimerPose} onClear={() => setDimerPose(null)} />
+                    {active?.source_type === 'dimer' && (
+                      <PoseCaption pose={active} onClear={() => setActiveKey(null)} />
                     )}
                   </div>
                 </div>
@@ -363,6 +402,20 @@ export default function ComplexViewerPage() {
               </div>
             )}
           </section>
+
+          {/* ── Recent docks ───────────────────────────────────────────
+              A leaderboard of completed poses lifted up from the pocket
+              panels. Selecting a row drives the active pose shown in 3D. */}
+          <DockedResults
+            entries={docked}
+            activeKey={activeKey}
+            onSelect={(e) => setActiveKey(entryKey(e))}
+            onRemove={handleRemove}
+            onClear={() => {
+              setDocked([])
+              setActiveKey(null)
+            }}
+          />
 
           {/* ── Binding-site analysis ──────────────────────────────────
               Streams in on its own; shows its own loading/error state while

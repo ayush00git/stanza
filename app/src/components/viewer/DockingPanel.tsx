@@ -184,12 +184,17 @@ export default function DockingPanel({
           typeof res.pose_pdb === 'string' &&
           res.pose_pdb.length > 0
         ) {
+          // Look up the source fragment so the results leaderboard can label
+          // this pose with a human-readable name and its SMILES.
+          const frag = fragments.find((f) => f.chembl_id === chemblId)
           onPose?.({
             pdb: res.pose_pdb,
             source_type: pocket.source_type,
             pocket_id: pocket.pocket_id,
             chembl_id: chemblId,
             binding_affinity: res.binding_affinity,
+            name: frag?.name,
+            smiles: frag?.smiles,
           })
         }
         if (!TERMINAL.includes(res.status)) {
@@ -286,13 +291,14 @@ export default function DockingPanel({
             return (
               <li
                 key={frag.chembl_id}
-                className={`grid grid-cols-1 gap-3 border-b border-hairline last:border-b-0 sm:grid-cols-[1fr_auto] sm:items-center ${
-                  compact ? 'px-3 py-2.5' : 'px-4 py-3'
+                className={`flex flex-col gap-3 border-b border-hairline last:border-b-0 sm:flex-row sm:items-start sm:justify-between ${
+                  compact ? 'px-3 py-3' : 'px-4 py-3.5'
                 }`}
               >
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                    <span className="font-mono text-xs text-accent">
+                <div className="min-w-0 flex-1">
+                  {/* Identity — id + name on one calm line. */}
+                  <div className="flex items-baseline gap-2">
+                    <span className="flex-none font-mono text-xs text-accent">
                       {frag.chembl_id}
                     </span>
                     {frag.name && (
@@ -300,21 +306,20 @@ export default function DockingPanel({
                     )}
                   </div>
 
+                  {/* Quiet, labelled metrics. */}
+                  <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1">
+                    <Metric label="MW" value={frag.mol_weight.toFixed(1)} />
+                    <Metric label="logP" value={frag.logp.toFixed(2)} />
+                    <Metric label="sim" value={frag.similarity_score.toFixed(2)} />
+                  </div>
+
+                  {/* SMILES — de-emphasised on its own line, full value on hover. */}
                   <p
-                    className="mt-1 truncate font-mono text-[11px] text-muted"
+                    className="mt-1.5 truncate font-mono text-[10px] text-muted/80"
                     title={frag.smiles}
                   >
                     {truncateSmiles(frag.smiles)}
                   </p>
-
-                  <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1">
-                    <Metric label="MW" value={frag.mol_weight.toFixed(1)} />
-                    <Metric label="logP" value={frag.logp.toFixed(2)} />
-                    <Metric
-                      label="sim"
-                      value={frag.similarity_score.toFixed(2)}
-                    />
-                  </div>
 
                   {state?.phase === 'error' && state.error && (
                     <p className="mt-1.5 font-mono text-[11px] text-conf-verylow">
@@ -330,13 +335,14 @@ export default function DockingPanel({
                   )}
                 </div>
 
-                <div className="flex items-center gap-3 sm:justify-end">
+                {/* Status + action, right-aligned with a steady width. */}
+                <div className="flex flex-none items-center gap-2 sm:w-40 sm:flex-col sm:items-end sm:gap-2">
                   {state && <StatusBadge state={state} />}
                   <button
                     type="button"
                     onClick={() => handleDock(frag)}
                     disabled={busy}
-                    className="rounded-md border border-hairline bg-paper-deep px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.1em] text-ink transition-colors hover:border-[var(--color-accent)] hover:text-accent disabled:cursor-not-allowed disabled:opacity-50"
+                    className="w-full max-w-[7rem] rounded-md border border-hairline bg-paper-deep px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.1em] text-ink transition-colors hover:border-[var(--color-accent)] hover:text-accent disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {state && isTerminal(state.phase) ? 'Re-dock' : 'Dock'}
                   </button>
