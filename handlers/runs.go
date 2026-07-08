@@ -139,6 +139,85 @@ func GetRunPocketsHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, pa)
 }
 
+type dockRunBody struct {
+	LigandSMILES string `json:"ligand_smiles"`
+}
+
+// DockRunHandler handles POST /runs/:id/dock — Stage 4. It docks a SMILES ligand
+// into the run's WT and mutant resistance pockets and returns the paired scores +
+// selectivity. Runs Stage-3 pocket analysis first if it hasn't been done, and
+// caches per-SMILES so re-docking the same molecule is free.
+func DockRunHandler(c *gin.Context) {
+	id := c.Param("id")
+	run, ok := DefaultRunStore.Get(id)
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "run not found"})
+		return
+	}
+
+	if ct := c.GetHeader("Content-Type"); !strings.Contains(strings.ToLower(ct), "application/json") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Content-Type must be application/json"})
+		return
+	}
+	var body dockRunBody
+	if err := json.NewDecoder(c.Request.Body).Decode(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid JSON: %v", err)})
+		return
+	}
+	smiles := strings.TrimSpace(body.LigandSMILES)
+	if smiles == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ligand_smiles is required"})
+		return
+	}
+
+	// Cache: the same molecule re-docked against this run is returned as-is.
+	for i := range run.Docks {
+		if run.Docks[i].SMILES == smiles {
+			c.JSON(http.StatusOK, run.Docks[i])
+			return
+		}
+	}
+
+	if run.Mutagenesis == nil {
+		c.JSON(http.StatusConflict, gin.H{"error": "run has no mutant structure yet"})
+		return
+	}
+	// Ensure Stage-3 pocket analysis has run (docking needs the pocket box).
+	if run.Pockets == nil {
+		pa, err := services.BuildPocketAnalysis(c.Request.Context(), run)
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("pocket analysis: %v", err)})
+			return
+		}
+		run.Pockets = pa
+	}
+
+	res, err := services.DockLigandDualTrack(c.Request.Context(), run, smiles)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+	run.Docks = append(run.Docks, *res)
+	DefaultRunStore.Put(run)
+	c.JSON(http.StatusCreated, res)
+}
+
+// ListRunDocksHandler handles GET /runs/:id/docks, returning the run's docked
+// molecules (the selectivity leaderboard).
+func ListRunDocksHandler(c *gin.Context) {
+	id := c.Param("id")
+	run, ok := DefaultRunStore.Get(id)
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "run not found"})
+		return
+	}
+	docks := run.Docks
+	if docks == nil {
+		docks = []models.LigandDock{}
+	}
+	c.JSON(http.StatusOK, gin.H{"docks": docks})
+}
+
 // GetRunHandler handles GET /runs/:id.
 func GetRunHandler(c *gin.Context) {
 	id := c.Param("id")

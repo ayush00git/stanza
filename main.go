@@ -45,6 +45,9 @@ func main() {
 	r.GET("/runs/:id/structure/:track", handlers.ServeRunStructureHandler)
 	// Stage-3 WT/mutant pocket analysis + delta for a run.
 	r.GET("/runs/:id/pockets", handlers.GetRunPocketsHandler)
+	// Stage-4 dual-track docking (WT + mutant) for a run.
+	r.POST("/runs/:id/dock", handlers.DockRunHandler)
+	r.GET("/runs/:id/docks", handlers.ListRunDocksHandler)
 
 	r.Run(":8080")
 }
