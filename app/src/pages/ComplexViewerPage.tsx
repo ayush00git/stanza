@@ -403,45 +403,51 @@ export default function ComplexViewerPage() {
             )}
           </section>
 
-          {/* ── Recent docks ───────────────────────────────────────────
-              A leaderboard of completed poses lifted up from the pocket
-              panels. Selecting a row drives the active pose shown in 3D. */}
-          <DockedResults
-            entries={docked}
-            activeKey={activeKey}
-            onSelect={(e) => setActiveKey(entryKey(e))}
-            onRemove={handleRemove}
-            onClear={() => {
-              setDocked([])
-              setActiveKey(null)
-            }}
-          />
-
-          {/* ── Binding-site analysis ──────────────────────────────────
-              Streams in on its own; shows its own loading/error state while
-              fpocket runs. Fragment docking lives inline in each pocket card
-              and reports finished poses back up via onPose. */}
-          <section className="flex flex-col">
-            <div className="mb-4 flex flex-col gap-1 border-t border-hairline pt-6">
+          {/* ── Docking workspace ──────────────────────────────────────
+              Fetched molecules to dock live inline in each pocket card in
+              the left column; the affinity-ranked results leaderboard sits
+              in the right column and drives the active pose shown above. */}
+          <section className="flex flex-col border-t border-hairline pt-6">
+            <div className="mb-4 flex flex-col gap-1">
               <h2 className="font-display text-base font-medium text-ink">Binding-site analysis</h2>
               <p className="text-xs text-muted">
-                Druggable pockets detected by fpocket. Dock a fragment in any pocket to view its pose
-                above.
+                Druggable pockets detected by fpocket. Dock a fragment in any pocket; results are
+                ranked by binding affinity on the right, and the selected pose is shown above.
               </p>
             </div>
-            <BindingSitesPanel
-              status={bsStatus}
-              result={bs}
-              error={bsError}
-              selectedKeys={selectedKeys}
-              onSelect={handleSelect}
-              onPose={handlePose}
-              uniprotId={complex.uniprot_id}
-              structureUrls={{
-                monomer: complex.monomer_structure_url,
-                dimer: complex.complex_structure_url,
-              }}
-            />
+
+            <div className="flex flex-col gap-8 lg:flex-row lg:gap-10">
+              {/* Left: pockets + the fetched molecules to dock (inline in cards). */}
+              <div className="min-w-0 flex-1">
+                <BindingSitesPanel
+                  status={bsStatus}
+                  result={bs}
+                  error={bsError}
+                  selectedKeys={selectedKeys}
+                  onSelect={handleSelect}
+                  onPose={handlePose}
+                  uniprotId={complex.uniprot_id}
+                  structureUrls={{
+                    monomer: complex.monomer_structure_url,
+                    dimer: complex.complex_structure_url,
+                  }}
+                />
+              </div>
+
+              {/* Right: completed docks ranked by binding affinity. */}
+              <aside className="flex-none lg:sticky lg:top-24 lg:w-80 lg:self-start">
+                <DockedResults
+                  entries={docked}
+                  activeKey={activeKey}
+                  onSelect={(e) => setActiveKey(entryKey(e))}
+                  onRemove={handleRemove}
+                  onClear={() => {
+                    setDocked([])
+                    setActiveKey(null)
+                  }}
+                />
+              </aside>
+            </div>
           </section>
         </div>
       )}

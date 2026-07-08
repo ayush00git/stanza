@@ -251,7 +251,7 @@ export default function BindingSitesPanel({
   structureUrls?: { monomer?: string; dimer?: string }
 }) {
   return (
-    <section className="mx-auto w-full max-w-5xl px-6 py-8">
+    <section className="w-full">
       <div className="flex items-baseline justify-between">
         <h2 className="font-display text-xl font-medium text-ink">Binding sites</h2>
         <span className="font-mono text-[11px] uppercase tracking-[0.15em] text-muted">
