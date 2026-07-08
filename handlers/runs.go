@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -66,13 +67,47 @@ func CreateRunHandler(c *gin.Context) {
 	if err != nil {
 		run.Status = "error"
 		run.Error = err.Error()
+		DefaultRunStore.Put(run)
+		c.JSON(http.StatusCreated, run)
+		return
+	}
+	run.Status = "structure_acquired"
+	run.WTStructure = result
+
+	// Stage-2 mutagenesis: build the matched WT/mutant structure pair. A failure
+	// here is recorded on the (successful Stage-1) run rather than dropping it.
+	mut, merr := services.BuildMutagenesis(c.Request.Context(), run.ID, uniprotID, mutation)
+	if merr != nil {
+		run.WTStructure.Notes = append(run.WTStructure.Notes, "mutagenesis failed: "+merr.Error())
 	} else {
-		run.Status = "structure_acquired"
-		run.WTStructure = result
+		run.Mutagenesis = mut
+		run.Status = "mutant_built"
 	}
 
 	DefaultRunStore.Put(run)
 	c.JSON(http.StatusCreated, run)
+}
+
+// ServeRunStructureHandler handles GET /runs/:id/structure/:track, returning the
+// Stage-2 generated PDB for a run's "wt" or "mutant" track.
+func ServeRunStructureHandler(c *gin.Context) {
+	id := c.Param("id")
+	track := c.Param("track")
+	if track != "wt" && track != "mutant" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "track must be 'wt' or 'mutant'"})
+		return
+	}
+	if _, ok := DefaultRunStore.Get(id); !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "run not found"})
+		return
+	}
+	path := services.RunStructurePath(id, track)
+	if _, err := os.Stat(path); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "structure not available for this run"})
+		return
+	}
+	c.Header("Content-Type", "chemical/x-pdb")
+	c.File(path)
 }
 
 // GetRunHandler handles GET /runs/:id.

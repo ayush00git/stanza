@@ -41,6 +41,8 @@ func main() {
 	r.POST("/runs", handlers.CreateRunHandler)
 	r.GET("/runs/:id", handlers.GetRunHandler)
 	r.GET("/runs", handlers.ListRunsHandler)
+	// Stage-2 generated structures (matched WT/mutant pair) for a run.
+	r.GET("/runs/:id/structure/:track", handlers.ServeRunStructureHandler)
 
 	r.Run(":8080")
 }
