@@ -16,6 +16,7 @@ export default defineConfig({
       '/complex': apiTarget,
       '/chembl': apiTarget,
       '/dock': apiTarget,
+      '/runs': apiTarget,
     },
   },
 })

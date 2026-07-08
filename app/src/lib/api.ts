@@ -382,3 +382,293 @@ export async function checkHealth(signal?: AbortSignal): Promise<boolean> {
     return false
   }
 }
+
+/* ────────────────────────────────────────────────────────────────────────
+   Resistance-design runs (the `/runs` flow)
+
+   A run pins a UniProt target + a resistance mutation and drives the pipeline:
+   acquire the wild-type structure, build a matched WT/mutant pair, analyse the
+   two pockets and their delta, generate candidate molecules with Claude
+   (RDKit-filtered), dock them into both pockets, and rank by selectivity.
+   These mirror the Go models in models/run.go, models/comparison.go and the
+   scoring package. Separate from the /complex oligomerization flow above.
+   ──────────────────────────────────────────────────────────────────────── */
+
+/** A parsed point substitution, e.g. "G12C". Mirrors models.Mutation. */
+export type Mutation = {
+  raw: string
+  wild_type: string
+  position: number
+  mutant: string
+}
+
+/** The wild-type structure chosen for a run (Stage 1). Mirrors models.WTStructure. */
+export type WTStructure = {
+  source: 'pdb_holo' | 'pdb_apo' | 'alphafold' | string
+  pdb_id?: string
+  alphafold_id?: string
+  structure_url: string
+  chain?: string
+  ligand_count: number
+  resolution?: number
+  residue_resolved: boolean
+  wild_type_matches: boolean
+  target_chain?: string
+  target_auth_seq_id?: number
+  notes?: string[]
+}
+
+/** The matched WT/mutant structure pair built by mutagenesis (Stage 2). */
+export type MutagenesisResult = {
+  tool: string
+  wt_structure_url: string
+  mutant_structure_url: string
+  target_chain: string
+  target_residue_number: number
+  wild_type_residue: string // 3-letter, e.g. "GLY"
+  mutant_residue: string // 3-letter, e.g. "CYS"
+  notes?: string[]
+}
+
+/** The resistance pocket to design against. Mirrors models.MutantPocket. */
+export type MutantPocket = {
+  key_residues: string[]
+  volume: number
+  hydrophobicity: number
+  polarity?: number
+  center: [number, number, number]
+  pocket_id: number
+}
+
+/** What the mutation did to the pocket (WT → mutant). Mirrors models.PocketDelta. */
+export type PocketDelta = {
+  changed: string[]
+  residues_gained?: string[]
+  residues_lost?: string[]
+  d_volume: number
+  d_hydrophobicity: number
+  d_polarity: number
+  hbonds_gained?: string[]
+  hbonds_lost?: string[]
+  effect: string
+}
+
+/** The resistance-pocket payload conditioning generation. Mirrors models.MutantPocketContext. */
+export type MutantPocketContext = {
+  mutant_pocket: MutantPocket
+  pocket_delta: PocketDelta
+}
+
+/** Stage-3 pocket analysis for a run (both tracks + delta). Mirrors models.PocketAnalysis. */
+export type RunPocketAnalysis = {
+  wt_pockets: Pocket[]
+  mutant_pockets: Pocket[]
+  conserved_count: number
+  wt_only_count: number
+  emergent_count: number
+  context?: MutantPocketContext | null
+}
+
+/**
+ * One molecule docked into BOTH tracks of a run (Stage 4). A single dock returns
+ * paired affinities, the selectivity margin, and both poses. Mirrors
+ * models.LigandDock. Sign convention: Vina kcal/mol, more negative = tighter;
+ * selectivity = wt_score − mutant_score, large positive = mutant-selective.
+ */
+export type LigandDock = {
+  smiles: string
+  wt_score: number
+  mutant_score: number
+  selectivity: number
+  wt_pose_pdb?: string
+  mutant_pose_pdb?: string
+}
+
+/** A Claude-proposed molecule that passed RDKit validation (Stage 5/6). Mirrors models.Candidate. */
+export type Candidate = {
+  smiles: string
+  inchikey: string
+  qed: number
+  ro5_pass: boolean
+  sa_score?: number
+  mol_weight: number
+  logp: number
+}
+
+/** A resistance-design run. Mirrors models.Run. */
+export type Run = {
+  id: string
+  uniprot_id: string
+  mutation: Mutation
+  site_hint?: string
+  status: string
+  wt_structure?: WTStructure
+  mutagenesis?: MutagenesisResult
+  pockets?: RunPocketAnalysis
+  docks?: LigandDock[]
+  candidates?: Candidate[]
+  error?: string
+  created_at: string
+}
+
+/** Selectivity scorecard for one docked molecule (Stage 7). Mirrors scoring.Scores. */
+export type Scores = {
+  smiles: string
+  mutant_score: number
+  wt_score: number
+  selectivity: number
+  qed?: number | null
+  fitness?: number | null
+  status: 'scored' | 'incomplete' | string
+}
+
+/** One row of the ranked leaderboard. Mirrors scoring.RankedMolecule. */
+export type RankedMolecule = {
+  rank: number
+  selected: boolean
+  smiles: string
+  scores: Scores
+}
+
+/** Fitness term weights. Mirrors scoring.FitnessWeights. */
+export type FitnessWeights = {
+  potency: number
+  selectivity: number
+  drug_likeness: number
+}
+
+/** The computed selectivity leaderboard for a run (Stage 7). Mirrors scoring.Ranking. */
+export type Ranking = {
+  run_id: string
+  weights: FitnessWeights
+  normalization: 'zscore' | 'minmax' | string
+  count: number
+  ranked: RankedMolecule[]
+  excluded: Scores[]
+}
+
+/** Extract an { error } message from a failed JSON response, with a fallback. */
+async function errorMessage(res: Response, fallback: string): Promise<string> {
+  const body = (await res.json().catch(() => ({}))) as { error?: string }
+  return body.error ?? `${fallback} (${res.status})`
+}
+
+/** The served PDB URL for a run's generated structure track ("wt" | "mutant"). */
+export function runStructureUrl(id: string, track: 'wt' | 'mutant'): string {
+  return `/runs/${encodeURIComponent(id)}/structure/${track}`
+}
+
+/** Create a resistance-design run (Stage 1–2 run synchronously server-side). Wraps POST /runs. */
+export async function createRun(
+  body: { uniprot_id: string; mutation: string; site_hint?: string },
+  signal?: AbortSignal,
+): Promise<Run> {
+  const res = await fetch('/runs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    signal,
+  })
+  if (!res.ok) throw new Error(await errorMessage(res, 'Could not create run'))
+  return (await res.json()) as Run
+}
+
+/** List all runs, newest-first. Wraps GET /runs. */
+export async function listRuns(signal?: AbortSignal): Promise<Run[]> {
+  const res = await fetch('/runs', { signal })
+  if (!res.ok) throw new Error(await errorMessage(res, 'Could not list runs'))
+  const body = (await res.json()) as { runs: Run[] | null }
+  return body.runs ?? []
+}
+
+/** Fetch one run. Wraps GET /runs/:id. */
+export async function getRun(id: string, signal?: AbortSignal): Promise<Run> {
+  const res = await fetch(`/runs/${encodeURIComponent(id)}`, { signal })
+  if (!res.ok) throw new Error(await errorMessage(res, 'Run not found'))
+  return (await res.json()) as Run
+}
+
+/**
+ * Run (or fetch cached) Stage-3 WT/mutant pocket analysis + delta. Slow the first
+ * time — the backend runs fpocket on both structures. Wraps GET /runs/:id/pockets.
+ */
+export async function getRunPockets(
+  id: string,
+  signal?: AbortSignal,
+): Promise<RunPocketAnalysis> {
+  const res = await fetch(`/runs/${encodeURIComponent(id)}/pockets`, { signal })
+  if (!res.ok) throw new Error(await errorMessage(res, 'Pocket analysis failed'))
+  return (await res.json()) as RunPocketAnalysis
+}
+
+/**
+ * Generate candidate molecules with Claude for a run's mutant pocket (Stage 6),
+ * RDKit-filtered (Stage 5). Returns only the kept, scored candidates. Slow — one
+ * Claude call (+ pocket analysis if not yet done). Wraps POST /runs/:id/generate.
+ */
+export async function generateCandidates(
+  id: string,
+  n?: number,
+  signal?: AbortSignal,
+): Promise<Candidate[]> {
+  const res = await fetch(`/runs/${encodeURIComponent(id)}/generate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(n != null ? { n } : {}),
+    signal,
+  })
+  if (!res.ok) throw new Error(await errorMessage(res, 'Generation failed'))
+  const body = (await res.json()) as { candidates: Candidate[] | null }
+  return body.candidates ?? []
+}
+
+/**
+ * Dock one SMILES into both the WT and mutant pockets (Stage 4). Synchronous:
+ * resolves with the paired scores + both poses (per-SMILES cached server-side, so
+ * re-docking the same molecule is instant). Wraps POST /runs/:id/dock.
+ */
+export async function dockRunLigand(
+  id: string,
+  smiles: string,
+  signal?: AbortSignal,
+): Promise<LigandDock> {
+  const res = await fetch(`/runs/${encodeURIComponent(id)}/dock`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ligand_smiles: smiles }),
+    signal,
+  })
+  if (!res.ok) throw new Error(await errorMessage(res, 'Docking failed'))
+  return (await res.json()) as LigandDock
+}
+
+/**
+ * Fetch the run's selectivity fitness leaderboard (Stage 7). Optional overrides:
+ * norm (zscore|minmax), top (how many flagged selected), and wp/ws/wq weights.
+ * Wraps GET /runs/:id/ranking.
+ */
+export async function getRunRanking(
+  id: string,
+  opts?: {
+    norm?: 'zscore' | 'minmax'
+    top?: number
+    weights?: FitnessWeights
+    signal?: AbortSignal
+  },
+): Promise<Ranking> {
+  const params = new URLSearchParams()
+  if (opts?.norm) params.set('norm', opts.norm)
+  if (opts?.top != null) params.set('top', String(opts.top))
+  if (opts?.weights) {
+    params.set('wp', String(opts.weights.potency))
+    params.set('ws', String(opts.weights.selectivity))
+    params.set('wq', String(opts.weights.drug_likeness))
+  }
+  const qs = params.toString()
+  const res = await fetch(
+    `/runs/${encodeURIComponent(id)}/ranking${qs ? `?${qs}` : ''}`,
+    { signal: opts?.signal },
+  )
+  if (!res.ok) throw new Error(await errorMessage(res, 'Ranking failed'))
+  return (await res.json()) as Ranking
+}
