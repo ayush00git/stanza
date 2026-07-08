@@ -43,6 +43,8 @@ func main() {
 	r.GET("/runs", handlers.ListRunsHandler)
 	// Stage-2 generated structures (matched WT/mutant pair) for a run.
 	r.GET("/runs/:id/structure/:track", handlers.ServeRunStructureHandler)
+	// Stage-3 WT/mutant pocket analysis + delta for a run.
+	r.GET("/runs/:id/pockets", handlers.GetRunPocketsHandler)
 
 	r.Run(":8080")
 }

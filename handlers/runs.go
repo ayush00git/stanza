@@ -110,6 +110,35 @@ func ServeRunStructureHandler(c *gin.Context) {
 	c.File(path)
 }
 
+// GetRunPocketsHandler handles GET /runs/:id/pockets — Stage 3. It runs fpocket on
+// the run's WT and mutant structures, computes the WT→mutant pocket delta, caches
+// the result on the run, and returns it. Requires Stage-2 mutagenesis to have run.
+func GetRunPocketsHandler(c *gin.Context) {
+	id := c.Param("id")
+	run, ok := DefaultRunStore.Get(id)
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "run not found"})
+		return
+	}
+	if run.Pockets != nil {
+		c.JSON(http.StatusOK, run.Pockets)
+		return
+	}
+	if run.Mutagenesis == nil {
+		c.JSON(http.StatusConflict, gin.H{"error": "run has no mutant structure yet"})
+		return
+	}
+
+	pa, err := services.BuildPocketAnalysis(c.Request.Context(), run)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+	run.Pockets = pa
+	DefaultRunStore.Put(run)
+	c.JSON(http.StatusOK, pa)
+}
+
 // GetRunHandler handles GET /runs/:id.
 func GetRunHandler(c *gin.Context) {
 	id := c.Param("id")
