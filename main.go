@@ -35,5 +35,12 @@ func main() {
 	r.POST("/dock", handlers.DockSubmitHandler)
 	r.GET("/dock/status", handlers.DockStatusHandler)
 
+	// Resistance-design runs (Stage 1): POST acquires the wild-type structure via
+	// the experimental → AlphaFold ladder plus residue verification; GET fetches
+	// a single run or lists all.
+	r.POST("/runs", handlers.CreateRunHandler)
+	r.GET("/runs/:id", handlers.GetRunHandler)
+	r.GET("/runs", handlers.ListRunsHandler)
+
 	r.Run(":8080")
 }
