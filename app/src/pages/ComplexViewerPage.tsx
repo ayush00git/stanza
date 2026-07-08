@@ -6,6 +6,7 @@ import { plddtBands } from '../lib/plddt'
 import MolstarViewer, { type HighlightResidue } from '../components/viewer/MolstarViewer'
 import BindingSitesPanel, { pocketKey } from '../components/viewer/BindingSitesPanel'
 import DockedResults, { entryKey } from '../components/viewer/DockedResults'
+import DockingPanel from '../components/viewer/DockingPanel'
 
 /** Pair each residue index with its chain into Mol* highlight targets. */
 function pocketResidues(pocket: Pocket): HighlightResidue[] {
@@ -130,6 +131,9 @@ export default function ComplexViewerPage() {
   // structure only; it never toggles off and never clears the other structure.
   const [selectedMonomer, setSelectedMonomer] = useState<Pocket | null>(null)
   const [selectedDimer, setSelectedDimer] = useState<Pocket | null>(null)
+  // The single most-recently-clicked pocket drives the docking section, whose
+  // candidate molecules are fetched for exactly this pocket.
+  const [focusedPocket, setFocusedPocket] = useState<Pocket | null>(null)
 
   // Completed docks accumulate into a "recent docks" leaderboard; `activeKey`
   // points at the one currently shown in 3D. The two viewers derive their pose
@@ -149,6 +153,7 @@ export default function ComplexViewerPage() {
   const handleSelect = (p: Pocket) => {
     if (p.source_type === 'monomer') setSelectedMonomer(p)
     else setSelectedDimer(p)
+    setFocusedPocket(p)
   }
 
   // Record a finished docking pose: upsert it into the results list (replacing
@@ -223,6 +228,7 @@ export default function ComplexViewerPage() {
 
     setSelectedMonomer(null)
     setSelectedDimer(null)
+    setFocusedPocket(null)
     setDocked([])
     setActiveKey(null)
     setBs(null)
@@ -403,35 +409,49 @@ export default function ComplexViewerPage() {
             )}
           </section>
 
-          {/* ── Docking workspace ──────────────────────────────────────
-              Fetched molecules to dock live inline in each pocket card in
-              the left column; the affinity-ranked results leaderboard sits
-              in the right column and drives the active pose shown above. */}
+          {/* ── Docking ────────────────────────────────────────────────
+              Left: candidate molecules fetched for the selected pocket.
+              Right: recent docks ranked by binding affinity. Selecting a
+              pocket below loads its molecules here; docking one renders the
+              pose in the viewer above and records it on the right. */}
           <section className="flex flex-col border-t border-hairline pt-6">
             <div className="mb-4 flex flex-col gap-1">
-              <h2 className="font-display text-base font-medium text-ink">Binding-site analysis</h2>
+              <h2 className="font-display text-base font-medium text-ink">Docking</h2>
               <p className="text-xs text-muted">
-                Druggable pockets detected by fpocket. Dock a fragment in any pocket; results are
-                ranked by binding affinity on the right, and the selected pose is shown above.
+                Select a pocket below to load candidate molecules, then dock them to compare
+                binding affinities.
               </p>
             </div>
 
             <div className="flex flex-col gap-8 lg:flex-row lg:gap-10">
-              {/* Left: pockets + the fetched molecules to dock (inline in cards). */}
+              {/* Left: molecules for the selected pocket. */}
               <div className="min-w-0 flex-1">
-                <BindingSitesPanel
-                  status={bsStatus}
-                  result={bs}
-                  error={bsError}
-                  selectedKeys={selectedKeys}
-                  onSelect={handleSelect}
-                  onPose={handlePose}
-                  uniprotId={complex.uniprot_id}
-                  structureUrls={{
-                    monomer: complex.monomer_structure_url,
-                    dimer: complex.complex_structure_url,
-                  }}
-                />
+                {focusedPocket ? (
+                  <>
+                    <div className="mb-1 font-mono text-[11px] uppercase tracking-[0.12em] text-ink">
+                      Pocket P{focusedPocket.pocket_id}{' '}
+                      <span className="text-muted">· {focusedPocket.source_type}</span>
+                    </div>
+                    <DockingPanel
+                      key={pocketKey(focusedPocket)}
+                      pocket={focusedPocket}
+                      uniprotId={complex.uniprot_id}
+                      proteinPdbPath={
+                        focusedPocket.source_type === 'monomer'
+                          ? complex.monomer_structure_url
+                          : complex.complex_structure_url
+                      }
+                      onPose={handlePose}
+                      compact
+                    />
+                  </>
+                ) : (
+                  <div className="rounded-lg border border-dashed border-hairline bg-paper-deep/40 px-6 py-12 text-center">
+                    <p className="font-mono text-xs uppercase tracking-[0.12em] text-muted">
+                      Select a pocket to load candidate molecules
+                    </p>
+                  </div>
+                )}
               </div>
 
               {/* Right: completed docks ranked by binding affinity. */}
@@ -448,6 +468,27 @@ export default function ComplexViewerPage() {
                 />
               </aside>
             </div>
+          </section>
+
+          {/* ── Binding-site analysis ──────────────────────────────────
+              Streams in on its own; shows its own loading/error state while
+              fpocket runs. Selecting a pocket loads its candidate molecules
+              in the docking section above. */}
+          <section className="flex flex-col border-t border-hairline pt-6">
+            <div className="mb-4 flex flex-col gap-1">
+              <h2 className="font-display text-base font-medium text-ink">Binding-site analysis</h2>
+              <p className="text-xs text-muted">
+                Druggable pockets detected by fpocket. Select one to dock candidate molecules
+                against it above.
+              </p>
+            </div>
+            <BindingSitesPanel
+              status={bsStatus}
+              result={bs}
+              error={bsError}
+              selectedKeys={selectedKeys}
+              onSelect={handleSelect}
+            />
           </section>
         </div>
       )}
