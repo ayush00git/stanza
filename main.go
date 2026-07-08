@@ -24,6 +24,10 @@ func main() {
 	// structures and returns detected pockets with a monomer/dimer comparison.
 	r.GET("/complex/:id/binding-sites", handlers.BindingSiteHandler)
 
+	// ChEMBL drug coverage, fetched lazily so it never blocks the structure
+	// viewers on the detail page.
+	r.GET("/complex/:id/drugs", handlers.ComplexDrugsHandler)
+
 	// ChEMBL fragment selection for a pocket.
 	r.GET("/chembl", handlers.ChemblHandler)
 

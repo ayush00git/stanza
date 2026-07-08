@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+
+	"github.com/ayush00git/stanza/services"
 )
 
 // ComplexDetailHandler handles GET /complex/:id
@@ -26,6 +28,31 @@ func ComplexDetailHandler(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, complex)
+}
+
+// ComplexDrugsHandler handles GET /complex/:id/drugs.
+// It fetches ChEMBL drug coverage (drug count + known drug names) for a target
+// on demand. This is split out from ComplexDetailHandler because the ChEMBL
+// lookup is slow — it paginates through every activity page for the target — and
+// would otherwise block the structure viewers on the detail page.
+func ComplexDrugsHandler(c *gin.Context) {
+	id := c.Param("id")
+	if id == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "path parameter 'id' is required"})
+		return
+	}
+
+	uniprotID := normalizeToUniProtID(id)
+
+	count, names, _ := services.FetchDrugCoverage(uniprotID)
+	if names == nil {
+		names = []string{}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"drug_count":       count,
+		"known_drug_names": names,
+	})
 }
 
 // normalizeToUniProtID extracts the UniProt accession from an AlphaFold ID.

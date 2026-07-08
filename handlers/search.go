@@ -183,24 +183,43 @@ func buildComplexForSearch(uniEntry *services.UniProtEntry) (*models.Complex, er
 	}, nil
 }
 
-// buildComplexFromUniProt builds a full Complex including ChEMBL drug coverage.
-// Used by ComplexDetailHandler where the extra latency is acceptable.
+// buildComplexFromUniProt builds a Complex from a UniProt accession. The two
+// upstream lookups it needs — UniProt metadata and the AlphaFold structure data
+// — are independent, so they run concurrently and the function returns as soon
+// as the slower of the two resolves. It deliberately does NOT fetch ChEMBL drug
+// coverage (that lookup is slow and paginates every activity page for the
+// target); DrugCount is set to -1 (unknown) and callers fetch drug data lazily
+// via ComplexDrugsHandler. Shared by ComplexDetailHandler and the search path.
 func buildComplexFromUniProt(uniprotID string) (*models.Complex, error) {
-	uniEntry, err := services.FetchUniProtEntry(uniprotID)
-	if err != nil {
-		return nil, err
-	}
+	var (
+		uniEntry *services.UniProtEntry
+		afData   *services.ComplexData
+		uniErr   error
+		afErr    error
+		wg       sync.WaitGroup
+	)
 
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		uniEntry, uniErr = services.FetchUniProtEntry(uniprotID)
+	}()
+	go func() {
+		defer wg.Done()
+		afData, afErr = services.FetchComplexData(uniprotID)
+	}()
+	wg.Wait()
+
+	if uniErr != nil {
+		return nil, uniErr
+	}
 	if !strings.Contains(uniEntry.EntryType, "Swiss-Prot") {
 		return nil, fmt.Errorf("skipping unreviewed entry %s", uniprotID)
 	}
-
-	afData, err := services.FetchComplexData(uniprotID)
-	if err != nil {
-		return nil, err
+	if afErr != nil {
+		return nil, afErr
 	}
 
-	drugCount, drugNames, _ := services.FetchDrugCoverage(uniprotID)
 	isWHO := scoring.IsWHOPathogen(uniEntry.Organism.TaxonID, uniEntry.Organism.ScientificName)
 
 	var diseases []string
@@ -231,8 +250,8 @@ func buildComplexFromUniProt(uniprotID string) (*models.Complex, error) {
 		MonomerPLDDTAvg:  afData.MonomerPLDDT,
 		DimerPLDDTAvg:    afData.DimerPLDDT,
 		DisorderDelta:    afData.DisorderDelta,
-		DrugCount:        drugCount,
-		KnownDrugNames:   drugNames,
+		DrugCount:        -1,
+		KnownDrugNames:   nil,
 		MonomerStructURL: afData.MonomerCifURL,
 		ComplexStructURL: afData.ComplexCifURL,
 		Category:         inferCategory(isWHO, diseases, afData.DisorderDelta),
