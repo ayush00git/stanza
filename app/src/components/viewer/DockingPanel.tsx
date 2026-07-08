@@ -4,6 +4,7 @@ import {
   getDockStatus,
   submitDock,
   type DockStatus,
+  type DockedPose,
   type Fragment,
   type Pocket,
 } from '../../lib/api'
@@ -39,6 +40,8 @@ type Props = {
    * omitted it keeps the standalone full-section layout.
    */
   compact?: boolean
+  /** called when a dock completes, to lift the pose up for 3D display */
+  onPose?: (pose: DockedPose) => void
 }
 
 const TERMINAL: DockStatus[] = ['done', 'error']
@@ -106,6 +109,7 @@ export default function DockingPanel({
   uniprotId,
   proteinPdbPath,
   compact,
+  onPose,
 }: Props) {
   const [status, setStatus] = useState<LoadStatus>('loading')
   const [fragments, setFragments] = useState<Fragment[]>([])
@@ -172,6 +176,22 @@ export default function DockingPanel({
           bindingAffinity: res.binding_affinity,
           error: res.error,
         })
+        // On successful completion, lift the docked pose up so the page can
+        // render it in the 3D Mol* viewer. Fires once per job: this branch is
+        // only reached on a terminal 'done' status while the panel is active.
+        if (
+          res.status === 'done' &&
+          typeof res.pose_pdb === 'string' &&
+          res.pose_pdb.length > 0
+        ) {
+          onPose?.({
+            pdb: res.pose_pdb,
+            source_type: pocket.source_type,
+            pocket_id: pocket.pocket_id,
+            chembl_id: chemblId,
+            binding_affinity: res.binding_affinity,
+          })
+        }
         if (!TERMINAL.includes(res.status)) {
           const t = setTimeout(() => {
             timers.current.delete(t)
@@ -299,6 +319,13 @@ export default function DockingPanel({
                   {state?.phase === 'error' && state.error && (
                     <p className="mt-1.5 font-mono text-[11px] text-conf-verylow">
                       {state.error}
+                    </p>
+                  )}
+
+                  {/* Nudge the user toward the 3D viewer once a pose is emitted. */}
+                  {state?.phase === 'done' && (
+                    <p className="mt-1.5 font-mono text-[10px] text-accent">
+                      Pose shown in 3D →
                     </p>
                   )}
                 </div>

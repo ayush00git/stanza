@@ -9,6 +9,8 @@ interface MolstarViewerProps {
   representation: string
   /** Residues of the selected pocket to spotlight in this viewer. */
   highlight?: HighlightResidue[]
+  /** Raw PDB text of a docked ligand pose to overlay on the structure. */
+  pose?: string | null
 }
 
 /**
@@ -21,12 +23,14 @@ export default function MolstarViewer({
   plddt,
   representation,
   highlight,
+  pose,
 }: MolstarViewerProps) {
   const { containerRef, isLoading, error } = useMolstar({
     structureUrl: url,
     representation,
     label,
     highlight,
+    pose,
   })
 
   return (

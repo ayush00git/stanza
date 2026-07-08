@@ -1,4 +1,4 @@
-import type { BindingSiteResult, Pocket } from '../../lib/api'
+import type { BindingSiteResult, DockedPose, Pocket } from '../../lib/api'
 import { plddtBand } from '../../lib/plddt'
 import DockingPanel from './DockingPanel'
 
@@ -43,12 +43,15 @@ function PocketRow({
   active,
   onSelect,
   uniprotId,
+  onPose,
 }: {
   pocket: Pocket
   rank: number
   active: boolean
   onSelect: (p: Pocket) => void
   uniprotId?: string
+  // onPose lifts a completed dock up to the page for 3D display.
+  onPose?: (pose: DockedPose) => void
 }) {
   const score = Math.max(0, Math.min(1, pocket.druggability_score))
   const residues = pocket.residue_indices?.length ?? 0
@@ -145,7 +148,7 @@ function PocketRow({
             className="mt-4 border-t border-hairline pt-4"
             onClick={(e) => e.stopPropagation()}
           >
-            <DockingPanel pocket={pocket} uniprotId={uniprotId} compact />
+            <DockingPanel pocket={pocket} uniprotId={uniprotId} onPose={onPose} compact />
           </div>
         )}
       </div>
@@ -164,12 +167,14 @@ function PocketColumn({
   selectedKeys,
   onSelect,
   uniprotId,
+  onPose,
 }: {
   title: string
   pockets: Pocket[]
   selectedKeys: Set<string>
   onSelect: (p: Pocket) => void
   uniprotId?: string
+  onPose?: (pose: DockedPose) => void
 }) {
   const sorted = byDruggability(pockets)
   return (
@@ -194,6 +199,7 @@ function PocketColumn({
               active={selectedKeys.has(pocketKey(p))}
               onSelect={onSelect}
               uniprotId={uniprotId}
+              onPose={onPose}
             />
           ))}
         </ul>
@@ -214,6 +220,7 @@ export default function BindingSitesPanel({
   selectedKeys,
   onSelect,
   uniprotId,
+  onPose,
 }: {
   status: Status
   result: BindingSiteResult | null
@@ -221,6 +228,8 @@ export default function BindingSitesPanel({
   selectedKeys: Set<string>
   onSelect: (p: Pocket) => void
   uniprotId?: string
+  // onPose lifts a completed dock up to the page for 3D display.
+  onPose?: (pose: DockedPose) => void
 }) {
   return (
     <section className="mx-auto w-full max-w-5xl px-6 py-8">
@@ -270,6 +279,7 @@ export default function BindingSitesPanel({
                 selectedKeys={selectedKeys}
                 onSelect={onSelect}
                 uniprotId={uniprotId}
+                onPose={onPose}
               />
               <PocketColumn
                 title="Monomer"
@@ -277,6 +287,7 @@ export default function BindingSitesPanel({
                 selectedKeys={selectedKeys}
                 onSelect={onSelect}
                 uniprotId={uniprotId}
+                onPose={onPose}
               />
             </div>
           )}

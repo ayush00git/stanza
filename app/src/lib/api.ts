@@ -289,6 +289,20 @@ export type DockingResult = {
 }
 
 /**
+ * A completed docking pose lifted out of the docking panel so the page can
+ * render it in the 3D viewer. `pdb` is the raw PDB content of the docked ligand
+ * (from DockingResult.pose_pdb); `source_type` says which structure (monomer or
+ * dimer) it belongs in so the right viewer overlays it.
+ */
+export type DockedPose = {
+  pdb: string
+  source_type: string
+  pocket_id: number
+  chembl_id?: string
+  binding_affinity?: number
+}
+
+/**
  * Submit an asynchronous docking job (SMILES ligand vs. a pocket). Resolves with
  * the job id (HTTP 202); poll getDockStatus with it until the job finishes.
  *

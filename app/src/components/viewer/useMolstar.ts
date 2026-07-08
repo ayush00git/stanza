@@ -9,7 +9,7 @@ import {
 } from 'molstar/lib/mol-plugin-state/helpers/structure-overpaint'
 import { MolScriptBuilder as MS } from 'molstar/lib/mol-script/language/builder'
 import { Script } from 'molstar/lib/mol-script/script'
-import { StructureSelection, StructureElement } from 'molstar/lib/mol-model/structure'
+import { StructureSelection, StructureElement, Structure } from 'molstar/lib/mol-model/structure'
 import { createRoot } from 'react-dom/client'
 
 import 'molstar/lib/mol-plugin-ui/skin/light.scss'
@@ -22,6 +22,9 @@ const HIGHLIGHT = 0x1a56db
 // Overpaint color used to mark a selected pocket's residues — a persistent
 // green so the highlight stays visible until the selection changes.
 const ACCENT = 0x16a34a
+// Uniform color for a docked ligand pose — a warm magenta that reads clearly
+// against the blue→orange pLDDT-colored receptor.
+const POSE = 0xd946ef
 
 /** One residue to spotlight: its chain id and residue sequence number. */
 export interface HighlightResidue {
@@ -43,6 +46,12 @@ interface UseMolstarOptions {
    * Pass an empty/undefined list to clear any existing highlight.
    */
   highlight?: HighlightResidue[]
+  /**
+   * Raw PDB text of a docked ligand pose to overlay on the protein. Parsed
+   * directly (no network fetch) and drawn as ball-and-stick. null/undefined
+   * removes any existing pose overlay.
+   */
+  pose?: string | null
 }
 
 /**
@@ -56,6 +65,7 @@ export function useMolstar({
   representation = 'cartoon',
   label = '',
   highlight,
+  pose,
 }: UseMolstarOptions) {
   const containerRef = useRef<HTMLElementWithRoot | null>(null)
   const pluginRef = useRef<any>(null)
@@ -67,6 +77,15 @@ export function useMolstar({
   // the representations and would wipe the overpaint) can re-apply it.
   const highlightRef = useRef<HighlightResidue[] | undefined>(highlight)
   highlightRef.current = highlight
+
+  // Keep the latest pose in a ref so a structure reload or representation swap
+  // (both of which wipe the overlay) can re-apply it afterwards.
+  const poseRef = useRef<string | null | undefined>(pose)
+  poseRef.current = pose
+  // Ref of the pose overlay's root data cell — lets us remove ONLY the pose
+  // subtree (data → trajectory → model → structure → representations) without
+  // disturbing the protein structure or its green highlight.
+  const poseDataRef = useRef<any>(null)
 
   // Initialize the plugin once, on mount.
   useEffect(() => {
@@ -162,6 +181,10 @@ export function useMolstar({
     ;(async () => {
       await updateRepresentation(plugin, representation)
       await applyHighlight(plugin, highlightRef.current)
+      // Rebuilding representations mangles the pose overlay too, so drop it and
+      // re-add a fresh ball-and-stick pose from the ref.
+      await removePose(plugin, poseDataRef)
+      if (poseRef.current) await addPose(plugin, poseRef.current, poseDataRef)
     })()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [representation, isLoading])
@@ -176,11 +199,27 @@ export function useMolstar({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [highlightKey, isLoading])
 
+  // Add/remove the docked ligand pose overlay when the pose string changes.
+  // Removing the old overlay first keeps at most one pose in the scene and
+  // leaves the protein structure + highlight untouched.
+  useEffect(() => {
+    const plugin = pluginRef.current
+    if (!plugin || !plugin.isInitialized || isLoading) return
+    ;(async () => {
+      await removePose(plugin, poseDataRef)
+      if (pose) await addPose(plugin, pose, poseDataRef)
+    })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pose])
+
   const loadStructure = async (plugin: any, url: string) => {
     setIsLoading(true)
     setError(null)
     try {
       await plugin.clear()
+      // plugin.clear() removes the previous pose subtree too, so the stale ref
+      // no longer points at anything.
+      poseDataRef.current = null
 
       // Mol* fetches the file itself from the remote URL — no local download.
       const data = await plugin.builders.data.download(
@@ -198,6 +237,10 @@ export function useMolstar({
       if (representation !== 'cartoon') await updateRepresentation(plugin, representation)
 
       plugin.managers.camera.reset()
+
+      // A reload wipes any docked pose; re-add the latest one from the ref so it
+      // survives URL changes and representation swaps.
+      if (poseRef.current) await addPose(plugin, poseRef.current, poseDataRef)
     } catch (err: unknown) {
       console.error(`[useMolstar] load failed for ${url}:`, err)
       setError(`Failed to load structure: ${err instanceof Error ? err.message : String(err)}`)
@@ -282,6 +325,66 @@ async function applyHighlight(plugin: any, highlight: HighlightResidue[] | undef
     }
   } catch (err) {
     console.warn('[useMolstar] applyHighlight failed:', err)
+  }
+}
+
+/**
+ * Overlay a docked ligand pose from raw PDB text on top of the protein.
+ *
+ * The string is fed straight into Mol* via the raw-data path — no network
+ * fetch — and the ligand is drawn as ball-and-stick in a uniform warm magenta
+ * so it stands out from the pLDDT-colored receptor. The root data cell's ref is
+ * stashed in `poseDataRef` so the whole pose subtree can be removed later
+ * without touching the protein. The camera is then framed on the new pose.
+ */
+async function addPose(plugin: any, poseString: string, poseDataRef: { current: any }) {
+  try {
+    const rawData = await plugin.builders.data.rawData(
+      { data: poseString, label: 'docked-pose' },
+      { state: { isGhost: true } },
+    )
+    // Track the root cell — deleting it later removes the entire pose subtree.
+    poseDataRef.current = rawData.ref
+
+    const trajectory = await plugin.builders.structure.parseTrajectory(rawData, 'pdb')
+    const model = await plugin.builders.structure.createModel(trajectory)
+    const struct = await plugin.builders.structure.createStructure(model, {
+      name: 'model',
+      params: {},
+    })
+
+    const comp = await plugin.builders.structure.tryCreateComponentStatic(struct, 'all')
+    if (comp) {
+      await plugin.builders.structure.representation.addRepresentation(comp, {
+        type: 'ball-and-stick',
+        color: 'uniform',
+        colorParams: { value: Color(POSE) },
+      })
+    }
+
+    // Frame the camera on the freshly added ligand so it's immediately visible.
+    const structure = struct.data ?? struct.cell?.obj?.data
+    if (structure) {
+      plugin.managers.camera.focusLoci(Structure.toStructureElementLoci(structure))
+    }
+  } catch (err) {
+    console.warn('[useMolstar] addPose failed:', err)
+  }
+}
+
+/**
+ * Remove a previously added pose overlay by deleting the subtree rooted at its
+ * raw-data cell. The protein structure and its green highlight are untouched.
+ * No-op when no pose is currently tracked.
+ */
+async function removePose(plugin: any, poseDataRef: { current: any }) {
+  try {
+    if (!poseDataRef.current) return
+    await plugin.state.data.build().delete(poseDataRef.current).commit()
+  } catch (err) {
+    console.warn('[useMolstar] removePose failed:', err)
+  } finally {
+    poseDataRef.current = null
   }
 }
 
