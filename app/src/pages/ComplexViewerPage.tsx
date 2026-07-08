@@ -21,8 +21,8 @@ const REPRESENTATIONS = [
   { label: 'Ball & stick', value: 'ball-and-stick' },
 ]
 
-// Spheres by default, per the brief — a fuller view of the fold than cartoon.
-const DEFAULT_REPRESENTATION = 'spacefill'
+// Cartoon by default — the clearest read of the fold and secondary structure.
+const DEFAULT_REPRESENTATION = 'cartoon'
 
 type BsStatus = 'loading' | 'done' | 'error'
 
