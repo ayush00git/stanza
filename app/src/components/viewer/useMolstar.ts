@@ -120,6 +120,9 @@ export function useMolstar({
           [PluginConfig.Viewport.ShowSettings, false],
           [PluginConfig.Viewport.ShowAnimation, false],
           [PluginConfig.Viewport.ShowSelectionMode, false],
+          // Hide the "Model 1 / 9" trajectory stepper — the docked pose is a
+          // multi-model trajectory but we only ever show the best model.
+          [PluginConfig.Viewport.ShowTrajectoryControls, false],
         )
 
         const plugin = await createPluginUI({
