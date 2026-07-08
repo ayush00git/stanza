@@ -31,11 +31,7 @@ type DockState = {
 
 type Props = {
   pocket: Pocket
-  uniprotId?: string
-  /**
-   * Protein source for docking — a local path or URL to the receptor PDB.
-   * Falls back to `uniprotId` (sent as protein_pdb_id) when omitted.
-   */
+  /** Receptor source for docking — a URL (or local path) to the structure PDB. */
   proteinPdbPath?: string
   /**
    * When true the panel renders inline inside a pocket card: no full-width
@@ -109,7 +105,6 @@ function Metric({ label, value }: { label: string; value: string }) {
  */
 export default function DockingPanel({
   pocket,
-  uniprotId,
   proteinPdbPath,
   compact,
   onPose,
@@ -228,7 +223,6 @@ export default function DockingPanel({
       source_type: pocket.source_type,
       ligand_smiles: frag.smiles,
       protein_pdb_path: proteinPdbPath,
-      protein_pdb_id: proteinPdbPath ? undefined : uniprotId,
     })
       .then((res) => {
         if (!activeRef.current) return

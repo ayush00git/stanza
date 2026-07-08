@@ -511,7 +511,6 @@ export default function ComplexViewerPage() {
                     <DockingPanel
                       key={pocketKey(focusedPocket)}
                       pocket={focusedPocket}
-                      uniprotId={complex.uniprot_id}
                       proteinPdbPath={
                         focusedPocket.source_type === 'monomer'
                           ? complex.monomer_structure_url
