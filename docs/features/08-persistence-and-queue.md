@@ -91,9 +91,9 @@ runs ─┬─▶ structures ──▶ pockets ─┐
   object storage. A `UNIQUE (run_id, kind)` enforces the "one WT + one mutant" invariant.
 - **`pockets`** — belong to a structure; `key_residues` and `delta` are `jsonb`
   (residue lists and the WT↔mutant delta payload from [`03`](03-dual-pocket-analysis-and-delta.md)
-  are variable-shape). `center` is the docking-box center reused by [`06`](06-dual-track-docking-and-caching.md).
+  are variable-shape). `center` is the docking-box center reused by [`04`](04-dual-track-docking-and-caching.md).
 - **`molecules`** — belong to a run, tagged with the `round` that produced them and a
-  self-referential `parent_id` for lineage across rounds ([`04`](04-generation-loop.md)).
+  self-referential `parent_id` for lineage across rounds ([`06`](06-generation-loop.md)).
   `smiles_hash` is the **canonical**-SMILES hash and is the first component of the dock
   cache key. Drug-likeness columns (`qed`, `ro5_pass`, `sa_score`) are filled by the
   `validate` worker ([`05`](05-molecule-validation-rdkit.md)).
@@ -154,7 +154,7 @@ Workers own the heavy dependencies that should not live in the Go binary:
 |---|---|---|---|
 | `mutagenesis` | Apply the point mutation to the WT structure (e.g. PDBFixer/Modeller) | `structures` (`kind = mutant`) | [`02`](02-mutagenesis.md) |
 | `fpocket` | Run `fpocket`, filter pockets, compute WT↔mutant delta | `pockets` | [`03`](03-dual-pocket-analysis-and-delta.md) |
-| `dock` | Ligand 3D prep + receptor prep + Vina (the work `services/jobs.go` does inline today) | `docks` | [`06`](06-dual-track-docking-and-caching.md) |
+| `dock` | Ligand 3D prep + receptor prep + Vina (the work `services/jobs.go` does inline today) | `docks` | [`04`](04-dual-track-docking-and-caching.md) |
 | `validate` | RDKit canonicalize + QED / Lipinski / SA score | `molecules` (`smiles_hash`, `qed`, `ro5_pass`, `sa_score`) | [`05`](05-molecule-validation-rdkit.md) |
 
 ### The Go↔Python boundary — the queue is the interface
@@ -199,7 +199,7 @@ enqueue round n docks ──▶ workers drain at pool capacity ──▶ docks r
 - **Idempotency, three layers**:
   1. **Enqueue** — `SET idem:<key> NX` dedupes concurrent enqueues.
   2. **Cache hit** — before enqueuing a dock, `SELECT` the `docks` cache triple; a `done`
-     row is reused directly (this is [`06`](06-dual-track-docking-and-caching.md)'s
+     row is reused directly (this is [`04`](04-dual-track-docking-and-caching.md)'s
      caching contract, stored here). A re-entered round after a crash re-hits cache
      instead of re-docking.
   3. **Write-back** — `INSERT ... ON CONFLICT (smiles_hash, pocket_id, params_hash) DO
@@ -260,7 +260,7 @@ CREATE TABLE pockets (
     key_residues JSONB            NOT NULL,            -- lining residues (idx/name/chain)
     volume       DOUBLE PRECISION,
     druggability DOUBLE PRECISION,
-    center       DOUBLE PRECISION[3],                 -- docking-box center (06)
+    center       DOUBLE PRECISION[3],                 -- docking-box center (04)
     delta        JSONB,                               -- WT↔mutant delta payload (03)
     created_at   TIMESTAMPTZ      NOT NULL DEFAULT now()
 );
@@ -271,7 +271,7 @@ CREATE TABLE molecules (
     id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     run_id      UUID        NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
     round       INTEGER     NOT NULL,
-    parent_id   UUID        REFERENCES molecules(id) ON DELETE SET NULL,  -- lineage (04)
+    parent_id   UUID        REFERENCES molecules(id) ON DELETE SET NULL,  -- lineage (06)
     smiles      TEXT        NOT NULL,
     smiles_hash TEXT        NOT NULL,                 -- hash of canonical SMILES (cache key)
     qed         DOUBLE PRECISION,                     -- filled by validate worker (05)
@@ -433,9 +433,9 @@ Migration mapping (behavior preserved where the frontend depends on it):
 | [`01-run-lifecycle-and-mutation.md`](01-run-lifecycle-and-mutation.md) | Owns the run state machine; this spec persists `runs.{status,round,round_state}` for crash-resume and provides the loop's dispatch substrate. |
 | [`02-mutagenesis.md`](02-mutagenesis.md) | Consumer of the `mutagenesis` job type; writes `structures (kind = mutant)`. |
 | [`03-dual-pocket-analysis-and-delta.md`](03-dual-pocket-analysis-and-delta.md) | Consumer of the `fpocket` job type; writes `pockets` incl. `delta jsonb`. |
-| [`04-generation-loop.md`](04-generation-loop.md) | Drives the loop that enqueues jobs and waits on the round barrier; owns the continue/stop decision; writes `molecules` (round + `parent_id` lineage). |
+| [`06-generation-loop.md`](06-generation-loop.md) | Drives the loop that enqueues jobs and waits on the round barrier; owns the continue/stop decision; writes `molecules` (round + `parent_id` lineage). |
 | [`05-molecule-validation-rdkit.md`](05-molecule-validation-rdkit.md) | Consumer of the `validate` job type; writes `molecules.{smiles_hash,qed,ro5_pass,sa_score}` — and is the step that produces the canonical `smiles_hash` the dock cache key needs. |
-| [`06-dual-track-docking-and-caching.md`](06-dual-track-docking-and-caching.md) | Consumer of the `dock` job type; the `docks` table + `UNIQUE (smiles_hash, pocket_id, params_hash)` **is** its caching contract's storage. |
+| [`04-dual-track-docking-and-caching.md`](04-dual-track-docking-and-caching.md) | Consumer of the `dock` job type; the `docks` table + `UNIQUE (smiles_hash, pocket_id, params_hash)` **is** its caching contract's storage. |
 | [`07-selectivity-scoring-and-ranking.md`](07-selectivity-scoring-and-ranking.md) | Batch scoring after a round's docks drain; writes `scores.{mutant_score,wt_score,selectivity,fitness}`. |
 | [`09-frontend-resistance-ui.md`](09-frontend-resistance-ui.md) | Reads `runs`/`molecules`/`scores` for the leaderboard and round/job status. |
 
@@ -502,7 +502,7 @@ Migration mapping (behavior preserved where the frontend depends on it):
 - **`params_hash` contents.** Must include everything that changes a dock result — box
   center + size, exhaustiveness, and the **engine version** — so a Vina upgrade busts the
   cache. Under-specifying it risks silently serving stale scores; over-specifying it
-  kills the hit rate. Pin the exact input set with [`06`](06-dual-track-docking-and-caching.md).
+  kills the hit rate. Pin the exact input set with [`04`](04-dual-track-docking-and-caching.md).
 - **Pose storage.** `pose_path` points at a file to keep rows small, but that couples the
   DB to a filesystem/object store lifecycle (orphaned files, backup skew). Alternatives:
   `bytea` in-row, or object storage with a signed URL. The current code returns pose PDB

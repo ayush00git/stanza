@@ -20,7 +20,7 @@ Given a resolved target (UniProt accession) and a parsed point mutation (e.g.
 These two paths are the entry point of the **dual-track** convention: everything
 after this stage runs once per track (see
 [`03-dual-pocket-analysis-and-delta.md`](03-dual-pocket-analysis-and-delta.md),
-[`06-dual-track-docking-and-caching.md`](06-dual-track-docking-and-caching.md)).
+[`04-dual-track-docking-and-caching.md`](04-dual-track-docking-and-caching.md)).
 The mutation is not metadata — it is the physical difference between the two
 inputs, and the selectivity margin (`wt_score − mutant_score`) is only meaningful
 if these two structures differ in exactly the mutated site and nothing else.
@@ -277,7 +277,7 @@ DDG                 *float64 // nullable
 - **Consumes:** the parsed, sequence-validated mutation from
   [`01-run-lifecycle-and-mutation.md`](01-run-lifecycle-and-mutation.md).
 - **Feeds:** [`03-dual-pocket-analysis-and-delta.md`](03-dual-pocket-analysis-and-delta.md)
-  (runs `fpocket` on both paths), [`06-dual-track-docking-and-caching.md`](06-dual-track-docking-and-caching.md)
+  (runs `fpocket` on both paths), [`04-dual-track-docking-and-caching.md`](04-dual-track-docking-and-caching.md)
   (docks into both), and the WT/mutant + ΔΔG surfaces in
   [`09-frontend-resistance-ui.md`](09-frontend-resistance-ui.md).
 - **Runs under:** the worker/queue in

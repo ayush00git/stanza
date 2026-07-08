@@ -21,7 +21,7 @@ identical box geometry. These two numbers are the raw material for the
 [`07-selectivity-scoring-and-ranking.md`](07-selectivity-scoring-and-ranking.md).
 
 Docking is the pipeline bottleneck: the generation loop
-([`04-generation-loop.md`](04-generation-loop.md)) runs `R` rounds, each
+([`06-generation-loop.md`](06-generation-loop.md)) runs `R` rounds, each
 proposing up to `N` molecules, and every molecule now costs **two** Vina runs.
 Naïvely that is `2 × N × R` docks per run. This feature keeps that number
 tractable two ways:
@@ -279,7 +279,7 @@ modified.
   supplies the WT & mutant pockets;
   [`05-molecule-validation-rdkit.md`](05-molecule-validation-rdkit.md) supplies
   the canonical SMILES used for the cache key;
-  [`04-generation-loop.md`](04-generation-loop.md) drives candidates in and sets
+  [`06-generation-loop.md`](06-generation-loop.md) drives candidates in and sets
   the per-round cap `N`.
 - **Downstream consumer:**
   [`07-selectivity-scoring-and-ranking.md`](07-selectivity-scoring-and-ranking.md)

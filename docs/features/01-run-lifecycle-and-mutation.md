@@ -159,7 +159,7 @@ round-loop back-edge (`scored → generating`) and terminal failure.
 
 `round` increments each time the loop re-enters generation. The stop condition
 (max rounds vs. selectivity threshold) is owned by
-[`04-generation-loop.md`](04-generation-loop.md); the run just records the
+[`06-generation-loop.md`](06-generation-loop.md); the run just records the
 current round and the terminal outcome.
 
 ### Per-round loop states
@@ -178,16 +178,16 @@ generating ──▶ validating_mols ──▶ docking ──▶ scoring ──�
 
 | Round state | Stage | Track behavior | Spec |
 |---|---|---|---|
-| `generating` | Propose candidate molecules for the current round. | Informed by the WT↔mutant pocket delta. | [`04-generation-loop.md`](04-generation-loop.md) |
+| `generating` | Propose candidate molecules for the current round. | Informed by the WT↔mutant pocket delta. | [`06-generation-loop.md`](06-generation-loop.md) |
 | `validating_mols` | Structural/drug-likeness filtering of proposed SMILES. | Track-agnostic (per molecule). | [`05-molecule-validation-rdkit.md`](05-molecule-validation-rdkit.md) |
-| `docking` | Dock each surviving molecule into **both** pockets. | Dual-track; cached per (molecule, pocket). | [`06-dual-track-docking-and-caching.md`](06-dual-track-docking-and-caching.md) |
+| `docking` | Dock each surviving molecule into **both** pockets. | Dual-track; cached per (molecule, pocket). | [`04-dual-track-docking-and-caching.md`](04-dual-track-docking-and-caching.md) |
 | `scoring` | Compute `wt_score`, `mutant_score`, and selectivity margin `wt_score − mutant_score`; rank. | Combines both tracks. | [`07-selectivity-scoring-and-ranking.md`](07-selectivity-scoring-and-ranking.md) |
 
 The run persists `{ status, round, round_state }` after each stage so a crash
 resumes at the last completed stage boundary rather than the last completed
 molecule. Idempotent stage work (dockings keyed by molecule+pocket) means a
 resumed round re-enters cleanly without duplicating compute — the caching
-contract lives in [`06-dual-track-docking-and-caching.md`](06-dual-track-docking-and-caching.md).
+contract lives in [`04-dual-track-docking-and-caching.md`](04-dual-track-docking-and-caching.md).
 
 ### How run_id threads downstream
 
@@ -395,9 +395,9 @@ func RunListHandler(c *gin.Context)   // GET  /runs
 | [`00-overview.md`](00-overview.md) | Product framing; run is Stage 0, the "spine everything hangs on". |
 | [`02-mutagenesis.md`](02-mutagenesis.md) | Consumes `ParsedMutation` + the resolved WT structure to build the mutant track; the semantic WT-residue check shares its sequence resolution. |
 | [`03-dual-pocket-analysis-and-delta.md`](03-dual-pocket-analysis-and-delta.md) | `site_hint` biases pocket selection; pockets inherit `track` via their structure. |
-| [`04-generation-loop.md`](04-generation-loop.md) | Owns the round stop condition; drives `round` increments and the `scored → generating` back-edge. |
+| [`06-generation-loop.md`](06-generation-loop.md) | Owns the round stop condition; drives `round` increments and the `scored → generating` back-edge. |
 | [`05-molecule-validation-rdkit.md`](05-molecule-validation-rdkit.md) | The `validating_mols` round state. |
-| [`06-dual-track-docking-and-caching.md`](06-dual-track-docking-and-caching.md) | The `docking` round state; idempotent per-(molecule, pocket) caching is what makes a resumed round safe. |
+| [`04-dual-track-docking-and-caching.md`](04-dual-track-docking-and-caching.md) | The `docking` round state; idempotent per-(molecule, pocket) caching is what makes a resumed round safe. |
 | [`07-selectivity-scoring-and-ranking.md`](07-selectivity-scoring-and-ranking.md) | The `scoring` round state; produces `wt_score`, `mutant_score`, margin. |
 | [`08-persistence-and-queue.md`](08-persistence-and-queue.md) | Owns table DDL, the store interface, and how `status`/`round`/`round_state` are persisted for crash-resume. This spec fixes relationships + the `track` convention only. |
 | [`09-frontend-resistance-ui.md`](09-frontend-resistance-ui.md) | Consumes `POST/GET /runs`; renders lifecycle + per-round state; mutation input form. |

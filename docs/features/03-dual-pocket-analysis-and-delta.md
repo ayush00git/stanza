@@ -21,7 +21,7 @@ mutation reshaped it:
   the key-residue set at/near the mutated position, and H-bond / contact partner
   changes.
 - Serialize the mutant pocket + delta as the small JSON the
-  [generation loop](04-generation-loop.md) (and the model it prompts) reads.
+  [generation loop](06-generation-loop.md) (and the model it prompts) reads.
 
 This is the hinge between structure and chemistry: everything downstream —
 generation, dual-track docking, selectivity — is conditioned on *this pocket* and
@@ -176,7 +176,7 @@ type MutantPocket struct {
     Volume         float64    `json:"volume"`
     Hydrophobicity float64    `json:"hydrophobicity"`
     Polarity       float64    `json:"polarity,omitempty"`
-    Center         [3]float64 `json:"center"`         // docking box seed (track 06)
+    Center         [3]float64 `json:"center"`         // docking box seed (track 04)
     PocketID       int        `json:"pocket_id"`
 }
 
@@ -223,7 +223,7 @@ The loop (and the model it prompts) reads exactly this shape:
 
 Field intent: `mutant_pocket` tells the model *what to bind*; `pocket_delta` tells
 it *why the WT drug fails and what to exploit*. `center` seeds the docking box in
-[dual-track docking](06-dual-track-docking-and-caching.md); `key_residues` and
+[dual-track docking](04-dual-track-docking-and-caching.md); `key_residues` and
 `changed` are surfaced in the [resistance UI](09-frontend-resistance-ui.md).
 
 ## Dependencies & touch points
@@ -232,7 +232,7 @@ it *why the WT drug fails and what to exploit*. `center` seeds the docking box i
   structure files (same numbering) and the mutated residue (chain, index, WT name,
   mutant name), threaded from
   [`01-run-lifecycle-and-mutation.md`](01-run-lifecycle-and-mutation.md).
-- **Consumer** — [`04-generation-loop.md`](04-generation-loop.md) reads
+- **Consumer** — [`06-generation-loop.md`](06-generation-loop.md) reads
   `MutantPocketContext` as its conditioning context each iteration.
 - **Reuse (unchanged)** — `services/fpocket.go`, `services/plddt.go`,
   `services/pocket_filter.go`, `models/pocket.go`.
@@ -241,7 +241,7 @@ it *why the WT drug fails and what to exploit*. `center` seeds the docking box i
   `MutantPocketContext` / `MutantPocket` / `PocketDelta`; optionally rename
   `monomer`/`dimer` JSON keys).
 - **Downstream also touches** — `Center` feeds
-  [`06-dual-track-docking-and-caching.md`](06-dual-track-docking-and-caching.md);
+  [`04-dual-track-docking-and-caching.md`](04-dual-track-docking-and-caching.md);
   `key_residues` + `changed` feed
   [`09-frontend-resistance-ui.md`](09-frontend-resistance-ui.md) (mutated-residue
   highlight, delta panel).

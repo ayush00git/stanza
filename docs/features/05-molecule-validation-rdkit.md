@@ -11,7 +11,7 @@ molecules before they reach the expensive docking stage.
 Every molecule that survives to docking should be **chemically valid**,
 **unique across the run**, and **drug-like enough to be worth the dock budget**.
 Docking a molecule into both the WT and mutant pockets (see
-[`06-dual-track-docking-and-caching.md`](06-dual-track-docking-and-caching.md))
+[`04-dual-track-docking-and-caching.md`](04-dual-track-docking-and-caching.md))
 is the most expensive step in the loop. Spending that budget on unparseable
 strings, duplicates, or oversized non-drug-like structures is pure waste.
 
@@ -33,7 +33,7 @@ Nothing here exists yet.
   `models.Fragment{ChemblID, Name, SMILES, MolWeight, LogP, Similarity}` pulled
   from a fixed ChEMBL lookup per pocket. Those SMILES are pre-vetted by their
   source, so there is no validation step. Once
-  [`04-generation-loop.md`](04-generation-loop.md) starts producing *novel*
+  [`06-generation-loop.md`](06-generation-loop.md) starts producing *novel*
   SMILES, they are untrusted and must be validated.
 - **The only async pattern is Go shelling out to CLIs.** `services/jobs.go`
   runs docking by launching `obabel` / `vina` subprocesses against an in-memory
@@ -239,11 +239,11 @@ def validate_batch(
   `sa_score`, `valid`, `kept`, `drop_reason`, with the
   `UNIQUE(run_id, inchikey)` constraint that backs cross-batch dedupe). This is
   the first Python worker in the system.
-- **[`04-generation-loop.md`](04-generation-loop.md)** — the consumer. The loop
+- **[`06-generation-loop.md`](06-generation-loop.md)** — the consumer. The loop
   emits raw candidate SMILES, calls this validator, and only forwards `kept`
   molecules to docking; `drop_reason` aggregates become feedback ("too many
   low_qed — ask for smaller, more drug-like scaffolds next round").
-- **[`06-dual-track-docking-and-caching.md`](06-dual-track-docking-and-caching.md)**
+- **[`04-dual-track-docking-and-caching.md`](04-dual-track-docking-and-caching.md)**
   — the protected stage. This filter runs **before** docking so the WT+mutant
   dock budget is spent only on unique, drug-like molecules.
 - **[`07-selectivity-scoring-and-ranking.md`](07-selectivity-scoring-and-ranking.md)**

@@ -69,9 +69,9 @@ Legend: **DONE** built · **EXTEND** exists, needs re-orientation · **BUILD** n
 | Structure acquisition (prefer experimental holo) | EXTEND | AlphaFold only | [`02-mutagenesis.md`](02-mutagenesis.md) (§ prerequisite) |
 | Mutagenesis (WT → mutant) | BUILD | — | [`02-mutagenesis.md`](02-mutagenesis.md) |
 | Dual WT/mutant pocket analysis + delta | EXTEND | monomer/dimer compare | [`03-dual-pocket-analysis-and-delta.md`](03-dual-pocket-analysis-and-delta.md) |
-| Claude molecule generation loop | BUILD | — | [`04-generation-loop.md`](04-generation-loop.md) |
+| Claude molecule generation loop | BUILD | — | [`06-generation-loop.md`](06-generation-loop.md) |
 | Molecule validation / drug-likeness (RDKit) | BUILD | — | [`05-molecule-validation-rdkit.md`](05-molecule-validation-rdkit.md) |
-| Dual-track docking + idempotent caching | EXTEND | single-pocket Vina | [`06-dual-track-docking-and-caching.md`](06-dual-track-docking-and-caching.md) |
+| Dual-track docking + idempotent caching | EXTEND | single-pocket Vina | [`04-dual-track-docking-and-caching.md`](04-dual-track-docking-and-caching.md) |
 | Selectivity scoring + ranking | BUILD | affinity-only board | [`07-selectivity-scoring-and-ranking.md`](07-selectivity-scoring-and-ranking.md) |
 | Persistence + job queue + workers | BUILD | in-memory | [`08-persistence-and-queue.md`](08-persistence-and-queue.md) |
 | Frontend resistance UI | EXTEND | monomer/dimer viewer | [`09-frontend-resistance-ui.md`](09-frontend-resistance-ui.md) |
@@ -83,8 +83,8 @@ Ship the loop **closed and single-threaded** before optimizing throughput.
 1. **Run lifecycle + mutation input** (`01`) — the spine everything hangs on.
 2. **Mutagenesis** (`02`) — unblocks the whole resistance angle; do it early.
 3. **Dual pocket analysis + delta** (`03`) — re-point the existing compare.
-4. **Dual-track docking + caching** (`06`) — dock into both pockets.
-5. **RDKit validation** (`05`) + **generation loop** (`04`) — close Claude →
+4. **Dual-track docking + caching** (`04`) — dock into both pockets.
+5. **RDKit validation** (`05`) + **generation loop** (`06`) — close Claude →
    validate → dock → score → Claude synchronously first.
 6. **Selectivity scoring + ranking** (`07`).
 7. **Persistence + queue** (`08`) — only once the loop works end to end.

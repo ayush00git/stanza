@@ -369,7 +369,7 @@ Wiring notes for `RunViewerPage`:
 | [`01-run-lifecycle-and-mutation.md`](01-run-lifecycle-and-mutation.md) | Consumes `POST /runs`, `GET /runs/:id`, `GET /runs`; renders `Run` lifecycle, `parsed_mutation`, and round state. |
 | [`02-mutagenesis.md`](02-mutagenesis.md) | WT/mutant structure URLs, provenance badges (source, engine, ΔΔG), and the mutated residue (chain/index/names) for the highlight — via `getRunStructures`. |
 | [`03-dual-pocket-analysis-and-delta.md`](03-dual-pocket-analysis-and-delta.md) | `mutant_pocket` (which pocket to pre-select/highlight) + `pocket_delta` (`PocketDeltaPanel`) — via `getRunPocket`. |
-| [`04-generation-loop.md`](04-generation-loop.md) | Produces per-round molecules with `round`/`parent_id`; drives lineage and board growth. |
+| [`06-generation-loop.md`](06-generation-loop.md) | Produces per-round molecules with `round`/`parent_id`; drives lineage and board growth. |
 | [`07-selectivity-scoring-and-ranking.md`](07-selectivity-scoring-and-ranking.md) | `wt_score`/`mutant_score`/`margin`/`QED`/`fitness` and per-track poses — the board's data via `getRunResults`. |
 | [`08-persistence-and-queue.md`](08-persistence-and-queue.md) | Owns the run read-endpoints' backing store and whether progress is SSE or polled. |
 

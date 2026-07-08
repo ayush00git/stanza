@@ -18,7 +18,7 @@ molecule's two dock scores (plus its drug-likeness) into:
 2. a **composite fitness** with tunable weights and pool normalisation so the
    three terms (potency, selectivity, drug-likeness) are comparable, and
 3. a **ranked, selected pool** with **lineage** (round, parent) attached — the
-   ranking is what the loop ([`04-generation-loop.md`](04-generation-loop.md))
+   ranking is what the loop ([`06-generation-loop.md`](06-generation-loop.md))
    reads to steer the next round and what the selectivity board
    ([`09-frontend-resistance-ui.md`](09-frontend-resistance-ui.md)) renders.
 
@@ -41,7 +41,7 @@ There is **no selectivity concept anywhere**.
   molecule record, no lineage, and no round/parent to feed back.
 
 So this stage is genuinely new. It consumes the **paired** dock output from
-[`06-dual-track-docking-and-caching.md`](06-dual-track-docking-and-caching.md)
+[`04-dual-track-docking-and-caching.md`](04-dual-track-docking-and-caching.md)
 and the **QED** drug-likeness score from
 [`05-molecule-validation-rdkit.md`](05-molecule-validation-rdkit.md), and writes
 its records through [`08-persistence-and-queue.md`](08-persistence-and-queue.md).
@@ -134,7 +134,7 @@ without re-docking.
 ### Handling incomplete / invalid molecules
 
 A molecule reaches this stage only if it validated (`05`) and both tracks docked
-(`06`). Guard the rest:
+(`04`). Guard the rest:
 
 - **Missing a track** (WT or mutant dock failed/errored) → cannot compute
   selectivity → mark `scores.status = "incomplete"`, set `fitness = null`, and
@@ -171,7 +171,7 @@ from*:
 Lineage is written with the molecule record (persistence lives in
 [`08-persistence-and-queue.md`](08-persistence-and-queue.md)); this stage
 **reads** it to group pools by round and **stamps** it onto ranking rows so
-[`04-generation-loop.md`](04-generation-loop.md) can surface "top + bottom by
+[`06-generation-loop.md`](06-generation-loop.md) can surface "top + bottom by
 fitness" with parentage, and the board in
 [`09-frontend-resistance-ui.md`](09-frontend-resistance-ui.md) can draw lineage.
 
@@ -285,7 +285,7 @@ returned to the loop and the frontend. HTTP surface (e.g.
 
 **Inputs**
 
-- [`06-dual-track-docking-and-caching.md`](06-dual-track-docking-and-caching.md)
+- [`04-dual-track-docking-and-caching.md`](04-dual-track-docking-and-caching.md)
   — paired `{ wt_score, mutant_score, wt_pose, mutant_pose }` per molecule. This
   stage assumes both tracks are present; it does not dock.
 - [`05-molecule-validation-rdkit.md`](05-molecule-validation-rdkit.md) — `QED`
@@ -294,7 +294,7 @@ returned to the loop and the frontend. HTTP surface (e.g.
 
 **Outputs / consumers**
 
-- [`04-generation-loop.md`](04-generation-loop.md) — reads the `Ranking` (top +
+- [`06-generation-loop.md`](06-generation-loop.md) — reads the `Ranking` (top +
   bottom by fitness, with lineage) to pick parents and steer the next round.
 - [`09-frontend-resistance-ui.md`](09-frontend-resistance-ui.md) — the
   selectivity board renders `Ranking`; this **replaces** `DockedResults.tsx` as

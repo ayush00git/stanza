@@ -24,7 +24,7 @@ This spec owns: the Go round orchestrator, the Claude call contract, what condit
 prompt, the feedback strategy, the stop criteria, and the persisted state machine that lets
 a crashed run resume. It **links out** for the compute steps — validation
 ([`05-molecule-validation-rdkit.md`](05-molecule-validation-rdkit.md)), dual-track docking
-([`06-dual-track-docking-and-caching.md`](06-dual-track-docking-and-caching.md)), and
+([`04-dual-track-docking-and-caching.md`](04-dual-track-docking-and-caching.md)), and
 scoring/ranking ([`07-selectivity-scoring-and-ranking.md`](07-selectivity-scoring-and-ranking.md)).
 
 ---
@@ -45,7 +45,7 @@ in the codebase**. What exists is scaffolding this loop will orchestrate, not re
 - **Docking works, single-track.** `services/docking.go` docks one SMILES into one pocket
   via Vina (`SMILESTo3D` → `PrepareReceptor`/`PrepareLigand` → `RunVinaDock` →
   `BindingAffinity`). This loop needs it run **twice per candidate** (mutant + WT); that
-  dual-track wrapper and its cache are specified in `06`.
+  dual-track wrapper and its cache are specified in `04`.
 - **No durable state.** Jobs live only in memory; a process restart loses everything. The
   loop's state machine must be persisted (`08`) so a run resumes.
 
@@ -150,7 +150,7 @@ The orchestrator stops the run when **any** of:
 
 - **Round budget** — `round >= MaxRounds`.
 - **Dock budget** — cumulative docks `>= MaxDocks`. Each candidate costs **2 docks**
-  (mutant + WT), so this is the real compute cap; the cache in `06` means re-proposed,
+  (mutant + WT), so this is the real compute cap; the cache in `04` means re-proposed,
   already-docked SMILES do not re-spend budget.
 - **Convergence** — best fitness has not improved by more than `epsilon` over the last
   `ConvergenceK` consecutive rounds (a stall counter). This catches the loop plateauing and
@@ -171,7 +171,7 @@ draft ─▶ validated ─▶ docked ─▶ scored ─▶ next_round ──▶ (
 
 - `draft` — Claude proposals received (or being requested); not yet validated.
 - `validated` — survived `05` (parse + dedupe + drug-likeness).
-- `docked` — both tracks docked via `06`; `mutant_score`/`wt_score` present.
+- `docked` — both tracks docked via `04`; `mutant_score`/`wt_score` present.
 - `scored` — fitness + selectivity computed by `07`.
 - `next_round` — decision: budget remains and still improving → advance round.
 - `done` — decision: stopped; leaderboard frozen.
@@ -181,7 +181,7 @@ Persistence and the worker queue are owned by
 `state`, `round`, cumulative `docks`, best-fitness, stall counter) and every candidate
 (SMILES, round, scores, validity) are written on each transition. On restart, the
 orchestrator loads the run, reads `state`, and re-enters the loop at that point — an
-interrupted `docked` round re-scores rather than re-docks (docks are cached in `06`), an
+interrupted `docked` round re-scores rather than re-docks (docks are cached in `04`), an
 interrupted `draft` re-requests proposals. This loop's state machine is a **sub-state of
 the overall run lifecycle** in
 [`01-run-lifecycle-and-mutation.md`](01-run-lifecycle-and-mutation.md); the generation run
@@ -213,7 +213,7 @@ advances the parent run through its "generating" phase.
 ```
 
 `history` is curated: top-k + bottom-k by fitness, capped. `n` = candidates requested this
-round (≤ `NPerRound`). Sign convention (shared with `06`/`07`): Vina affinities are
+round (≤ `NPerRound`). Sign convention (shared with `04`/`07`): Vina affinities are
 kcal/mol, **more negative = tighter**; `selectivity = wt_score − mutant_score`, **positive
 and large = binds mutant, spares WT**.
 
@@ -271,7 +271,7 @@ type RoundState string
 const (
     StateDraft     RoundState = "draft"      // proposals in hand, pre-validation
     StateValidated RoundState = "validated"  // survived RDKit (05)
-    StateDocked    RoundState = "docked"     // dual-track docked (06)
+    StateDocked    RoundState = "docked"     // dual-track docked (04)
     StateScored    RoundState = "scored"     // fitness computed (07)
     StateNextRound RoundState = "next_round" // decision: continue
     StateDone      RoundState = "done"       // decision: stop
@@ -285,8 +285,8 @@ type GenerationConfig struct {
     RunID         string
     MutantPocket  PocketFacts
     PocketDelta   PocketDelta
-    MutantPDBPath string        // receptor for the mutant dock track (06)
-    WTPDBPath     string        // receptor for the WT dock track (06)
+    MutantPDBPath string        // receptor for the mutant dock track (04)
+    WTPDBPath     string        // receptor for the WT dock track (04)
     NPerRound     int           // CAP N candidates per round
     MaxRounds     int           // round budget
     MaxDocks      int           // dock budget (2 docks / candidate)
@@ -316,7 +316,7 @@ type GenerationRun struct {
     Stall int         // rounds since Best last improved
 }
 
-// Loop drives the run: propose → validate(05) → dock(06) → score(07) → decide,
+// Loop drives the run: propose → validate(05) → dock(04) → score(07) → decide,
 // persisting after each transition. Returns when the run reaches StateDone.
 func (r *GenerationRun) Loop(ctx context.Context) error
 
@@ -356,7 +356,7 @@ func (s *GenerationStore) Get(runID string) (GenerationStatus, bool)   // status
 | **in** | [`01-run-lifecycle-and-mutation.md`](01-run-lifecycle-and-mutation.md) | Generation is a sub-phase of the run; the loop's state machine advances the parent run's "generating" state. |
 | **in** | [`03-dual-pocket-analysis-and-delta.md`](03-dual-pocket-analysis-and-delta.md) | Supplies `mutant_pocket` facts (key residues, volume, hydrophobicity) and `pocket_delta` (changed/effect) that condition the prompt. |
 | **calls** | [`05-molecule-validation-rdkit.md`](05-molecule-validation-rdkit.md) | Each round's `draft → validated`: parse, dedupe (canonical SMILES), drug-likeness / QED. |
-| **calls** | [`06-dual-track-docking-and-caching.md`](06-dual-track-docking-and-caching.md) | Each round's `validated → docked`: dock every survivor into mutant AND WT pockets; idempotent cache so re-proposed SMILES do not re-dock or re-spend budget. |
+| **calls** | [`04-dual-track-docking-and-caching.md`](04-dual-track-docking-and-caching.md) | Each round's `validated → docked`: dock every survivor into mutant AND WT pockets; idempotent cache so re-proposed SMILES do not re-dock or re-spend budget. |
 | **calls** | [`07-selectivity-scoring-and-ranking.md`](07-selectivity-scoring-and-ranking.md) | Each round's `docked → scored`: selectivity margin + fitness; provides the ranking that feeds `Feedback()` and the final leaderboard. |
 | **in** | [`08-persistence-and-queue.md`](08-persistence-and-queue.md) | Persists run + candidate state per transition (crash-resume); provides the worker queue that runs each compute step. |
 | **reuses** | `services/jobs.go`, `handlers/dock_handler.go` | Async job pattern (UUID keys, background goroutine, `202` + poll) for the run store and per-step jobs. |
@@ -399,7 +399,7 @@ func (s *GenerationStore) Get(runID string) (GenerationStatus, bool)   // status
   keeps the prefix worth caching.
 - **Duplicate / mode-collapse candidates.** The model may re-propose near-identical winners
   round after round, wasting the `N` cap. Dedupe on canonical SMILES (`05`) *and* consider a
-  novelty/diversity nudge in the prompt or a similarity filter before docking. Cache in `06`
+  novelty/diversity nudge in the prompt or a similarity filter before docking. Cache in `04`
   softens the compute cost but not the wasted proposal slots.
 - **Fitness weighting is deferred to `07`.** The exact `f(potency, selectivity,
   drug_likeness)` (weights, whether potency uses `−mutant_score`, how QED enters) lives in
@@ -410,7 +410,7 @@ func (s *GenerationStore) Get(runID string) (GenerationStatus, bool)   // status
   Needs empirical tuning per target.
 - **Docking noise vs. margin.** Vina affinities carry run-to-run variance that can rival a
   small selectivity margin; a "win" may be noise. Consider multiple poses / averaged
-  affinity (a `06` concern) before trusting a narrow margin, and surface margin uncertainty
+  affinity (a `04` concern) before trusting a narrow margin, and surface margin uncertainty
   to the model rather than a single number.
 - **Model / API failure modes.** Rate limits, refusals, or timeouts on the proposer must
   degrade gracefully (retry with backoff, then fail the run with a clear status) — the
