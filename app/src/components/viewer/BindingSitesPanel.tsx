@@ -293,8 +293,8 @@ export default function BindingSitesPanel({
           ) : (
             <div className="mt-6 flex flex-col gap-8 sm:flex-row sm:gap-10">
               <PocketColumn
-                title="Dimer · complex"
-                pockets={result.pockets}
+                title="Monomer"
+                pockets={result.monomer_pockets}
                 selectedKeys={selectedKeys}
                 onSelect={onSelect}
                 uniprotId={uniprotId}
@@ -302,8 +302,8 @@ export default function BindingSitesPanel({
                 structureUrls={structureUrls}
               />
               <PocketColumn
-                title="Monomer"
-                pockets={result.monomer_pockets}
+                title="Dimer · complex"
+                pockets={result.pockets}
                 selectedKeys={selectedKeys}
                 onSelect={onSelect}
                 uniprotId={uniprotId}
