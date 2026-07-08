@@ -13,6 +13,9 @@ type LoadStatus = 'loading' | 'done' | 'error'
 /** Interval between /dock/status polls, in ms. */
 const POLL_INTERVAL_MS = 2000
 
+/** How many fragments to reveal at a time (initial page and each subsequent reveal). */
+const FRAGMENT_PAGE_SIZE = 6
+
 /** Per-fragment docking progress, keyed by ChEMBL id. */
 type DockState = {
   /** 'submitting' precedes a job id; then it tracks the server DockStatus. */
@@ -30,6 +33,12 @@ type Props = {
    * Falls back to `uniprotId` (sent as protein_pdb_id) when omitted.
    */
   proteinPdbPath?: string
+  /**
+   * When true the panel renders inline inside a pocket card: no full-width
+   * `<section>` wrapper or large heading, and tightened paddings. When false or
+   * omitted it keeps the standalone full-section layout.
+   */
+  compact?: boolean
 }
 
 const TERMINAL: DockStatus[] = ['done', 'error']
@@ -92,16 +101,25 @@ function Metric({ label, value }: { label: string; value: string }) {
  * Presentation + lifecycle are self-contained; wire it into a page by passing a
  * pocket (and optionally the receptor source and uniprot id).
  */
-export default function DockingPanel({ pocket, uniprotId, proteinPdbPath }: Props) {
+export default function DockingPanel({
+  pocket,
+  uniprotId,
+  proteinPdbPath,
+  compact,
+}: Props) {
   const [status, setStatus] = useState<LoadStatus>('loading')
   const [fragments, setFragments] = useState<Fragment[]>([])
   const [error, setError] = useState<string | null>(null)
   const [docking, setDocking] = useState<Record<string, DockState>>({})
+  // How many fragments are currently revealed; grows in FRAGMENT_PAGE_SIZE steps.
+  const [visibleCount, setVisibleCount] = useState(FRAGMENT_PAGE_SIZE)
 
   // Track live poll timers so we can clear them on unmount / pocket change.
   const timers = useRef<Set<ReturnType<typeof setTimeout>>>(new Set())
   // Guards async callbacks against stale updates after unmount / pocket change.
   const activeRef = useRef(true)
+  // Sentinel element at the end of the list; observed to auto-reveal more.
+  const sentinelRef = useRef<HTMLLIElement | null>(null)
 
   // Fetch fragments on mount and whenever the pocket changes.
   useEffect(() => {
@@ -111,6 +129,8 @@ export default function DockingPanel({ pocket, uniprotId, proteinPdbPath }: Prop
     setError(null)
     setFragments([])
     setDocking({})
+    // Reset progressive reveal back to the first page for the new pocket.
+    setVisibleCount(FRAGMENT_PAGE_SIZE)
 
     getChemblFragments(pocket.pocket_id, {
       sourceType: pocket.source_type,
@@ -193,17 +213,35 @@ export default function DockingPanel({ pocket, uniprotId, proteinPdbPath }: Prop
       })
   }
 
-  return (
-    <section className="mx-auto w-full max-w-5xl px-6 py-8">
-      <div className="flex items-baseline justify-between">
-        <h2 className="font-display text-xl font-medium text-ink">
-          Fragment docking
-        </h2>
-        <span className="font-mono text-[11px] uppercase tracking-[0.15em] text-muted">
-          ChEMBL · pocket P{pocket.pocket_id}
-        </span>
-      </div>
+  // Fragments revealed so far, and whether more remain to reveal.
+  const visibleFragments = fragments.slice(0, visibleCount)
+  const hasMore = visibleCount < fragments.length
+  const remaining = fragments.length - visibleCount
 
+  /** Reveal the next page of fragments. */
+  const revealMore = () =>
+    setVisibleCount((c) => Math.min(c + FRAGMENT_PAGE_SIZE, fragments.length))
+
+  // Observe the sentinel: when it scrolls into view, reveal the next page.
+  // Guarded by a ref and disconnected on cleanup / when the sentinel unmounts.
+  useEffect(() => {
+    if (!hasMore) return
+    const node = sentinelRef.current
+    if (!node) return
+
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) revealMore()
+    })
+    observer.observe(node)
+
+    return () => observer.disconnect()
+    // Re-run when the reveal position or fragment set changes so a fresh
+    // sentinel (further down the list) gets observed.
+  }, [hasMore, visibleCount, fragments.length])
+
+  // Shared body: loading / error / empty states and the progressive list.
+  const body = (
+    <>
       {status === 'loading' && (
         <p className="mt-6 animate-pulse font-mono text-xs uppercase tracking-[0.15em] text-muted">
           Fetching candidate fragments from ChEMBL…
@@ -222,13 +260,15 @@ export default function DockingPanel({ pocket, uniprotId, proteinPdbPath }: Prop
 
       {status === 'done' && fragments.length > 0 && (
         <ul className="mt-6 rounded-md border border-hairline bg-paper">
-          {fragments.map((frag) => {
+          {visibleFragments.map((frag) => {
             const state = docking[frag.chembl_id]
             const busy = state != null && !isTerminal(state.phase)
             return (
               <li
                 key={frag.chembl_id}
-                className="grid grid-cols-1 gap-3 border-b border-hairline px-4 py-3 last:border-b-0 sm:grid-cols-[1fr_auto] sm:items-center"
+                className={`grid grid-cols-1 gap-3 border-b border-hairline last:border-b-0 sm:grid-cols-[1fr_auto] sm:items-center ${
+                  compact ? 'px-3 py-2.5' : 'px-4 py-3'
+                }`}
               >
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
@@ -277,8 +317,51 @@ export default function DockingPanel({ pocket, uniprotId, proteinPdbPath }: Prop
               </li>
             )
           })}
+
+          {/* Sentinel + fallback button: only while more fragments remain. */}
+          {hasMore && (
+            <li
+              ref={sentinelRef}
+              className={`flex justify-center ${compact ? 'px-3 py-2.5' : 'px-4 py-3'}`}
+            >
+              <button
+                type="button"
+                onClick={revealMore}
+                className="rounded-md border border-hairline bg-paper-deep px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.1em] text-muted transition-colors hover:border-[var(--color-accent)] hover:text-accent"
+              >
+                Load {Math.min(FRAGMENT_PAGE_SIZE, remaining)} more
+              </button>
+            </li>
+          )}
         </ul>
       )}
+    </>
+  )
+
+  // Compact mode: lightweight inline container with a small mono label.
+  if (compact) {
+    return (
+      <div className="mt-4">
+        <span className="font-mono text-[11px] uppercase tracking-[0.15em] text-muted">
+          Fragment docking · ChEMBL
+        </span>
+        {body}
+      </div>
+    )
+  }
+
+  return (
+    <section className="mx-auto w-full max-w-5xl px-6 py-8">
+      <div className="flex items-baseline justify-between">
+        <h2 className="font-display text-xl font-medium text-ink">
+          Fragment docking
+        </h2>
+        <span className="font-mono text-[11px] uppercase tracking-[0.15em] text-muted">
+          ChEMBL · pocket P{pocket.pocket_id}
+        </span>
+      </div>
+
+      {body}
     </section>
   )
 }
