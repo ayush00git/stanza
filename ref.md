@@ -67,32 +67,67 @@ results survive navigating to a structure page and back.
 
 ### Structure viewer page (`/structure/:id`)
 
-- **Structures** — collapsible/minimisable section with two Mol* viewers
-  (monomer + dimer), loaded straight from remote `.cif` URLs. Representation
-  switcher (spheres/cartoon/surface/ball&stick), pLDDT legend.
-- **Binding sites** — `BindingSitesPanel` runs fpocket on load and lists pockets
-  in two columns (dimer / monomer), **sorted by druggability** with the top
-  pocket marked, every fpocket metric labelled.
+- **Independent loading** — the fast `getComplex` metadata and the slow fpocket
+  `getBindingSites` analysis are fetched in parallel with independent state and
+  error handling. The Mol* viewers render the moment the metadata resolves; the
+  binding-site analysis never blocks the structures and streams in on its own
+  status below.
+- **Header** — target identity (gene/protein name, UniProt id) plus a WHO-pathogen
+  badge when flagged, and a metadata strip beneath it (organism, known-drug
+  count/"Undrugged", category) rendered only for the fields that are present.
+- **Structures** — a prominent, collapsible (default-open) card with two Mol*
+  viewers (monomer + dimer), loaded straight from remote `.cif` URLs.
+  Representation switcher (spheres/cartoon/surface/ball&stick), pLDDT legend.
+- **Binding-site analysis** — `BindingSitesPanel` lists pockets in two columns
+  (dimer / monomer), **sorted by druggability** with the top pocket marked,
+  every fpocket metric labelled.
 - **Selection → highlight** — clicking a pocket overpaints its residues in
   **green** and focuses the camera in the matching viewer. Highlight is
   **persistent per structure**: it stays until another pocket in that same
   structure is clicked; each structure keeps its own selection independently.
-- **Docking** — the most-recently selected pocket drives a `DockingPanel`
-  (fragment list + submit/poll docking jobs), rendered below the analysis.
+- **Docking (inline in the pocket card)** — selecting a pocket expands its card
+  to reveal a compact `DockingPanel` inline (no separate bottom section). It
+  lists candidate ChEMBL fragments and submits/polls docking jobs per fragment.
+- **Docked pose in 3D** — when a dock finishes, its `pose_pdb` (from
+  `DockingResult`) is lifted up via an `onPose` callback
+  (`DockingPanel → BindingSitesPanel → ComplexViewerPage`) and rendered in the
+  matching structure's Mol* viewer as a **magenta ball-and-stick** ligand
+  overlay, camera-framed. Pose state is kept per structure; a `PoseCaption`
+  under the viewer shows the pocket/affinity/ChEMBL id and a "Clear" button that
+  removes only the pose, leaving the protein and green highlight intact.
 
 ### Mol* wrapper
 
-- `components/viewer/MolstarViewer.tsx` — one canvas + overlays.
+- `components/viewer/MolstarViewer.tsx` — one canvas + overlays. Takes a `pose`
+  prop (raw PDB text of a docked ligand) threaded straight through to the hook.
 - `components/viewer/useMolstar.ts` — plugin lifecycle, structure load,
   representation, and residue highlight (green overpaint `0x16a34a` +
   `focusLoci`). Assumes fpocket `residue_indices` == mmCIF `auth_seq_id` (1-based).
+  Also handles the **docked-pose overlay**: the raw PDB is parsed via Mol*'s
+  raw-data path (no network fetch) and drawn as ball-and-stick in a uniform
+  magenta (`0xd946ef`), camera-framed. The pose subtree is tracked by cell ref
+  so it can be removed on its own (or re-applied after a representation swap /
+  structure reload) without disturbing the protein or the green highlight.
+
+### Docking panel (`components/viewer/DockingPanel.tsx`)
+
+Given a pocket, fetches candidate ChEMBL fragments and docks each one. Supports a
+`compact` mode (used inline in the pocket card) and reports finished poses via
+its `onPose` callback. Fragments load **progressively in pages of 6**
+(`FRAGMENT_PAGE_SIZE`): an `IntersectionObserver` sentinel at the end of the
+list auto-reveals the next page, with a "Load more" button as a fallback. Each
+"Dock" button submits an async job and polls `/dock/status` every 2 s until it
+reaches a terminal state, showing progress per fragment.
 
 ### API client (`lib/api.ts`)
 
 Typed wrappers over every endpoint: `searchComplexes` (SSE), `getComplex`,
 `getBindingSites`, `getChemblFragments`, `submitDock`, `getDockStatus`,
-`checkHealth`. Types mirror the Go models. `lib/plddt.ts` holds the shared
-pLDDT colour bands.
+`checkHealth`. Types mirror the Go models (`DockingResult`, `Conformation`,
+etc.). It also defines a UI-only `DockedPose` type (`pdb`, `source_type`,
+`pocket_id`, `chembl_id?`, `binding_affinity?`) — the shape lifted out of the
+docking panel so the page can overlay a finished pose in the right viewer.
+`lib/plddt.ts` holds the shared pLDDT colour bands.
 
 ### Dev proxy (`vite.config.ts`)
 
@@ -118,7 +153,13 @@ cd app && npm install && npm run dev
   (gitignored).
 - Live network access to **UniProt** and **AlphaFold** is required for search,
   complex detail, and structure/pocket analysis.
-- Docking may shell out to an external tool at runtime.
+- **Docking** shells out to external tools and requires both on `PATH`:
+  - **OpenBabel** (`obabel`) — SMILES→3D ligand generation and PDB↔PDBQT
+    conversion (receptor/ligand prep and pose PDBQT→PDB for visualisation).
+  - **AutoDock Vina** (`vina`) — the docking run itself.
+  Jobs run async in an in-memory `JobStore` (UUID-keyed, capped at 100, oldest
+  evicted); each runs in a temp workspace that is removed on completion.
+  End-to-end docking therefore requires both `vina` and `obabel` installed.
 - **Rebuild from source on deploy** — the checked-in `stanza` binary can be
   stale (predated the `/dock` routes).
 
@@ -126,16 +167,21 @@ cd app && npm install && npm run dev
 
 - `go build ./...` and `tsc -b && vite build` pass.
 - End-to-end smoke test passed: `/health`, `/complex/P00533` (EGFR),
-  `/complex/P00533/binding-sites` (fpocket ran, 104 pockets), and
-  `/dock/status` all responded correctly.
+  `/complex/P00533/binding-sites` (fpocket ran), and `/complex` metadata all
+  responded correctly.
+- **Full docking round-trip verified** against EGFR (P00533): binding-site
+  analysis → `POST /dock` of a ligand SMILES into a monomer pocket, using the
+  AlphaFold monomer `.cif` as the receptor → OpenBabel receptor/ligand prep →
+  Vina → `done` with a real binding affinity and a populated `pose_pdb`. The
+  receptor is docked from the same structure fpocket detected the pocket in, so
+  the pocket centre and receptor coordinates line up.
 
 ---
 
 ## Known gaps / next steps
 
 - Pockets aren't yet reflected back into the 3D view beyond the selected-pocket
-  highlight (e.g. colour-by-pocket overview).
+  highlight and the docked-pose overlay (e.g. a colour-by-pocket overview).
 - The Mol* bundle is ~3.3 MB (lazy-loaded); consider code-splitting.
-- Docking UX is minimal (list + submit/poll); results aren't visualised in 3D.
 - Residue-index → `auth_seq_id` mapping assumes 1-based PDB numbering; revisit
   if any fpocket output uses 0-based indices.
