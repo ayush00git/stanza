@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -242,15 +241,16 @@ func ListRunDocksHandler(c *gin.Context) {
 }
 
 type generateRunBody struct {
-	Rounds int `json:"rounds"`
-	N      int `json:"n"`
+	N int `json:"n"`
 }
 
-// GenerateRunHandler handles POST /runs/:id/generate — Stage 6. It starts the
-// Claude-orchestrated generate → dock → score → feed-back loop in the background
-// and returns 202 immediately; poll GET /runs/:id for progress (run.generation)
-// and the growing selectivity leaderboard (run.docks). Docking is slow, so the
-// loop must not block the request.
+// GenerateRunHandler handles POST /runs/:id/generate — Stage 6. It asks Claude for
+// candidate molecules aimed at the run's mutant resistance pocket and returns them
+// as SMILES right away. Docking is the slow step, so it is deliberately NOT done
+// here: the frontend docks a molecule on demand via POST /runs/:id/dock when the
+// user picks one (the same list-then-dock flow used for ChEMBL fragments). Any
+// molecules already docked for this run are fed back to Claude as scored history,
+// so calling generate again refines the suggestions.
 func GenerateRunHandler(c *gin.Context) {
 	id := c.Param("id")
 	run, ok := DefaultRunStore.Get(id)
@@ -263,42 +263,16 @@ func GenerateRunHandler(c *gin.Context) {
 	// A body is optional; ignore decode errors and fall back to defaults.
 	_ = json.NewDecoder(c.Request.Body).Decode(&body)
 
-	genMu.Lock()
-	if run.Generation != nil && run.Generation.Status == "running" {
-		genMu.Unlock()
-		c.JSON(http.StatusConflict, gin.H{"error": "a generation is already running for this run"})
+	candidates, err := services.GenerateCandidates(c.Request.Context(), run, body.N, &genMu)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
 	}
-	run.Generation = &models.GenerationStatus{
-		Status:    "running",
-		StartedAt: time.Now().UTC().Format(time.RFC3339),
-	}
-	genMu.Unlock()
 	DefaultRunStore.Put(run)
 
-	// Fresh context: the loop outlives this request.
-	go func() {
-		err := services.RunGenerationLoop(context.Background(), run, body.Rounds, body.N, &genMu)
-		genMu.Lock()
-		g := models.GenerationStatus{}
-		if run.Generation != nil {
-			g = *run.Generation
-		}
-		if err != nil {
-			g.Status = "error"
-			g.Error = err.Error()
-		} else {
-			g.Status = "done"
-		}
-		run.Generation = &g
-		genMu.Unlock()
-		DefaultRunStore.Put(run)
-	}()
-
-	c.JSON(http.StatusAccepted, gin.H{
-		"status": "running",
-		"run_id": id,
-		"poll":   "/runs/" + id,
+	c.JSON(http.StatusOK, gin.H{
+		"run_id":     id,
+		"candidates": candidates,
 	})
 }
 

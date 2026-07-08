@@ -1,12 +1,34 @@
-# Stanza — Molecule Generation Loop
+# Stanza — Molecule Generation
 
-The closed-loop engine that **generates** chemistry: Claude proposes SMILES conditioned on
-the mutant pocket and prior scores → validate → dock into both tracks → score → feed the
-best *and* worst back → repeat until budget or convergence. Status: **BUILD** (new — this
-loop does not exist today; there is no Claude integration yet).
+Claude **generates** chemistry: given the mutant resistance pocket and the WT→mutant delta,
+it proposes drug-like SMILES aimed at binding the mutant while sparing the wild type.
 
 One-line: the generative core that turns "here is the resistant pocket" into "here are
 molecules that bind the mutant and spare the wild type."
+
+---
+
+## Implemented (current): propose on request, dock on demand
+
+The shipped design **decouples proposal from docking**. Docking (Vina, ~30–60 s per molecule
+× two tracks) is the entire cost, and blocking a generate call on it is what made the earlier
+in-loop version take minutes. So the two steps are separate endpoints:
+
+- **`POST /runs/:id/generate`** → one Claude call; returns the proposed SMILES immediately as
+  `{ "run_id": "...", "candidates": ["<SMILES>", ...] }`. **No docking.** Body `{ "n": <int> }`
+  is optional (how many to request, capped at `maxGenPerCall`). Runs Stage-3 pocket analysis
+  first if it hasn't been done. New proposals are deduped against everything already docked or
+  proposed and merged into `run.candidates`, so `GET /runs/:id` rehydrates them after a reload.
+- **`POST /runs/:id/dock`** (Stage 4 — already synchronous and per-SMILES cached) → the
+  frontend docks one molecule on demand when the user selects it and hits enter. Same
+  list-then-dock UX as the ChEMBL fragment panel (`app/src/components/viewer/DockingPanel.tsx`):
+  a fast list, then a per-row dock action.
+
+**Feedback is user-driven, not autonomous.** Molecules already docked for a run are passed
+back to Claude as scored history (`wt_score` / `mutant_score` / `selectivity`) on the next
+`generate` call — dock a few, generate again, and the model climbs the gradient, without the
+server ever running an unattended multi-round loop. The autonomous closed loop described below
+(rounds, budgets, convergence, crash-resume) is the **target** design, not yet built.
 
 ---
 
@@ -31,8 +53,10 @@ scoring/ranking ([`07-selectivity-scoring-and-ranking.md`](07-selectivity-scorin
 
 ## Current state
 
-Nothing generates molecules today, and there is **no Anthropic/Claude integration anywhere
-in the codebase**. What exists is scaffolding this loop will orchestrate, not replace:
+Claude now proposes molecules (`services/generation.go` → `GenerateCandidates`, wired to
+`POST /runs/:id/generate`), and each is docked on demand through the dual-track dock (`04`).
+The **autonomous** closed loop below — rounds, budgets, convergence, crash-resume — is not
+built; what follows is its target design. The scaffolding it would orchestrate:
 
 - **Molecules come from a fixed library.** `services/chembl.go` (`FetchFragments`) pulls
   fragment-like molecules from ChEMBL and ranks them against a single pocket's descriptors.
@@ -54,7 +78,13 @@ primitives, with the Claude proposer as the one new external dependency.
 
 ---
 
-## Design
+## Target design: autonomous closed loop
+
+> **Not yet built.** The sections below specify the *autonomous* loop, where the server runs
+> propose → validate → dock → score → feedback for N rounds on its own until a budget or
+> convergence stop. The shipped build (see *Implemented* above) instead exposes proposal and
+> docking as separate on-demand endpoints, with feedback driven by the user re-calling
+> `generate`. Keep this as the north star for when unattended, hands-off runs are wanted.
 
 ### One round
 

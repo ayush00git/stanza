@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -17,21 +16,21 @@ import (
 
 const (
 	// genModel is the model that proposes molecules. Opus is used for the
-	// hardest reasoning — designing chemistry that exploits a specific pocket.
+	// hardest reasoning — designing chemistry aimed at a specific pocket.
 	genModel     = anthropic.ModelClaudeOpus4_8
 	genMaxTokens = 16000
 	proposeTool  = "propose_molecules"
-	// generation loop bounds (docking budget is the constraint).
-	maxGenRounds  = 4
-	maxGenPerRound = 8
+	// maxGenPerCall caps how many molecules one generate call requests, so a
+	// single call's cost — and the list handed back to the UI — stays bounded.
+	maxGenPerCall = 8
 	// historyForPrompt caps how many prior molecules are shown to the model.
 	historyForPrompt = 12
 )
 
 // ProposeMolecules asks Claude for `n` novel drug-like SMILES that should bind the
 // mutant resistance pocket while sparing the wild type, conditioned on the pocket
-// context, the WT→mutant delta, and the prior rounds' selectivity scores. It uses a
-// tool so the output is a clean SMILES list, not prose.
+// context, the WT→mutant delta, and the selectivity scores of any molecules already
+// docked for this run. It uses a tool so the output is a clean SMILES list, not prose.
 func ProposeMolecules(ctx context.Context, pctx *models.MutantPocketContext, mutation models.Mutation, history []models.LigandDock, n int) ([]string, error) {
 	if strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY")) == "" {
 		return nil, fmt.Errorf("ANTHROPIC_API_KEY is not set")
@@ -144,140 +143,80 @@ func buildGenerationPrompt(pctx *models.MutantPocketContext, mutation models.Mut
 	return b.String()
 }
 
-// RunGenerationLoop is Stage 6. It runs the Claude-orchestrated generate → dock →
-// score → feed-back loop for a run: each round Claude proposes molecules, each new
-// one is docked into both tracks (reusing the dual-track dock + its per-SMILES
-// cache), the results feed the next round, and the run's dock leaderboard is left
-// sorted by selectivity. Requires the run's structures (Stage 2); it runs Stage-3
-// pocket analysis first if needed.
+// GenerateCandidates is Stage 6. It asks Claude for up to n drug-like molecules
+// aimed at the run's mutant resistance pocket and returns them as SMILES WITHOUT
+// docking. Docking is the slow step, so it is deliberately deferred: the caller
+// docks a molecule on demand via DockLigandDualTrack (Stage 4) when the user picks
+// one, the same list-then-dock flow used for ChEMBL fragments.
 //
-// Molecules within a round are docked in parallel (bounded by CPU count), and mu
-// guards every read/write of the run's mutable fields (Docks, Generation) so it is
-// safe to run in a background goroutine while handlers read the run under the same
-// mutex. Callers update run.Generation.Status before/after this returns.
-func RunGenerationLoop(ctx context.Context, run *models.Run, rounds, n int, mu *sync.Mutex) error {
-	if rounds <= 0 {
-		rounds = 2
-	}
-	if rounds > maxGenRounds {
-		rounds = maxGenRounds
-	}
+// Molecules already docked for this run are passed to Claude as scored history, so
+// calling this again after some docks acts as an informal, user-driven selectivity
+// feedback loop. Requires the run's structures (Stage 2); it runs Stage-3 pocket
+// analysis first if needed. New proposals are deduped against everything already
+// docked or proposed, merged into run.Candidates, and the new ones are returned. mu
+// guards every read/write of the run's mutable fields so it is safe under
+// concurrent handlers.
+func GenerateCandidates(ctx context.Context, run *models.Run, n int, mu *sync.Mutex) ([]string, error) {
 	if n <= 0 {
 		n = 4
 	}
-	if n > maxGenPerRound {
-		n = maxGenPerRound
+	if n > maxGenPerCall {
+		n = maxGenPerCall
 	}
-	setGenStatus(mu, run, func(g *models.GenerationStatus) { g.Rounds = rounds })
 
 	if run.Mutagenesis == nil {
-		return fmt.Errorf("generation: run has no structures (run Stage-2 mutagenesis first)")
+		return nil, fmt.Errorf("generation: run has no structures (run Stage-2 mutagenesis first)")
 	}
-	if run.Pockets == nil || run.Pockets.Context == nil {
+
+	// Ensure Stage-3 pocket analysis has run — the proposal is conditioned on the
+	// mutant pocket context and the WT→mutant delta.
+	mu.Lock()
+	ready := run.Pockets != nil && run.Pockets.Context != nil
+	mu.Unlock()
+	if !ready {
 		pa, err := BuildPocketAnalysis(ctx, run)
 		if err != nil {
-			return fmt.Errorf("generation: pocket analysis: %w", err)
+			return nil, fmt.Errorf("generation: pocket analysis: %w", err)
 		}
 		mu.Lock()
 		run.Pockets = pa
 		mu.Unlock()
 	}
-	if run.Pockets.Context == nil {
-		return fmt.Errorf("generation: no resistance pocket to design against")
-	}
 
-	// Prepare both receptor PDBQTs once, up front, so the parallel docks below reuse
-	// the cached files instead of re-preparing (and racing on) them.
-	if _, err := ensureReceptorPDBQT(run.ID, "wt"); err != nil {
-		return fmt.Errorf("generation: receptor prep (wt): %w", err)
-	}
-	if _, err := ensureReceptorPDBQT(run.ID, "mutant"); err != nil {
-		return fmt.Errorf("generation: receptor prep (mutant): %w", err)
-	}
-
-	seen := make(map[string]bool)
+	// Snapshot the pocket context, the scored history, and the SMILES to skip.
 	mu.Lock()
+	pctx := run.Pockets.Context
+	history := append([]models.LigandDock(nil), run.Docks...)
+	seen := make(map[string]bool, len(run.Docks)+len(run.Candidates))
 	for _, d := range run.Docks {
 		seen[d.SMILES] = true
 	}
+	for _, c := range run.Candidates {
+		seen[c] = true
+	}
 	mu.Unlock()
-
-	// Each dock uses screenCPU cores; run about NumCPU/screenCPU molecules at once.
-	workers := max(1, runtime.NumCPU()/screenCPU)
-
-	for r := 0; r < rounds; r++ {
-		setGenStatus(mu, run, func(g *models.GenerationStatus) { g.Round = r + 1 })
-
-		mu.Lock()
-		history := append([]models.LigandDock(nil), run.Docks...)
-		mu.Unlock()
-
-		candidates, err := ProposeMolecules(ctx, run.Pockets.Context, run.Mutation, history, n)
-		if err != nil {
-			return fmt.Errorf("generation round %d: %w", r+1, err)
-		}
-
-		// Keep only novel candidates (dedupe against everything already tried).
-		var todo []string
-		for _, smi := range candidates {
-			smi = strings.TrimSpace(smi)
-			if smi == "" {
-				continue
-			}
-			mu.Lock()
-			dup := seen[smi]
-			if !dup {
-				seen[smi] = true
-			}
-			mu.Unlock()
-			if !dup {
-				todo = append(todo, smi)
-			}
-		}
-
-		// Dock the novel candidates in parallel.
-		sem := make(chan struct{}, workers)
-		var wg sync.WaitGroup
-		for _, smi := range todo {
-			wg.Add(1)
-			sem <- struct{}{}
-			go func() {
-				defer wg.Done()
-				defer func() { <-sem }()
-				dock, derr := DockLigandDualTrack(ctx, run, smi)
-				if derr != nil {
-					// Invalid SMILES or a failed dock: skip it, keep the loop going.
-					return
-				}
-				mu.Lock()
-				run.Docks = append(run.Docks, *dock)
-				if run.Generation != nil {
-					g := *run.Generation
-					g.Docked = len(run.Docks)
-					run.Generation = &g
-				}
-				mu.Unlock()
-			}()
-		}
-		wg.Wait()
+	if pctx == nil {
+		return nil, fmt.Errorf("generation: no resistance pocket to design against")
 	}
 
-	// Leave the leaderboard ranked by selectivity (most mutant-selective first).
-	mu.Lock()
-	sort.Slice(run.Docks, func(i, j int) bool { return run.Docks[i].Selectivity > run.Docks[j].Selectivity })
-	mu.Unlock()
-	return nil
-}
-
-// setGenStatus replaces run.Generation with an updated copy under mu, so a reader
-// holding a snapshot of the old pointer never observes a half-written struct.
-func setGenStatus(mu *sync.Mutex, run *models.Run, fn func(*models.GenerationStatus)) {
-	mu.Lock()
-	defer mu.Unlock()
-	g := models.GenerationStatus{}
-	if run.Generation != nil {
-		g = *run.Generation
+	proposed, err := ProposeMolecules(ctx, pctx, run.Mutation, history, n)
+	if err != nil {
+		return nil, err
 	}
-	fn(&g)
-	run.Generation = &g
+
+	// Keep only novel, non-empty proposals and add them to the run's candidate pool.
+	var fresh []string
+	mu.Lock()
+	for _, smi := range proposed {
+		smi = strings.TrimSpace(smi)
+		if smi == "" || seen[smi] {
+			continue
+		}
+		seen[smi] = true
+		fresh = append(fresh, smi)
+		run.Candidates = append(run.Candidates, smi)
+	}
+	mu.Unlock()
+
+	return fresh, nil
 }
