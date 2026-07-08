@@ -17,6 +17,9 @@ const POLL_INTERVAL_MS = 2000
 /** How many fragments to reveal at a time (initial page and each subsequent reveal). */
 const FRAGMENT_PAGE_SIZE = 6
 
+/** ChEMBL compound report card, for linking a molecule to its source record. */
+const CHEMBL_BASE_URL = 'https://www.ebi.ac.uk/chembl/compound_report_card/'
+
 /** Per-fragment docking progress, keyed by ChEMBL id. */
 type DockState = {
   /** 'submitting' precedes a job id; then it tracks the server DockStatus. */
@@ -124,6 +127,9 @@ export default function DockingPanel({
   const activeRef = useRef(true)
   // Sentinel element at the end of the list; observed to auto-reveal more.
   const sentinelRef = useRef<HTMLLIElement | null>(null)
+  // The fixed-height scrollable list container; also the observer root, so
+  // auto-reveal triggers on scroll WITHIN the list rather than on page scroll.
+  const listRef = useRef<HTMLUListElement | null>(null)
 
   // Fetch fragments on mount and whenever the pocket changes.
   useEffect(() => {
@@ -254,9 +260,13 @@ export default function DockingPanel({
     const node = sentinelRef.current
     if (!node) return
 
-    const observer = new IntersectionObserver((entries) => {
-      if (entries.some((e) => e.isIntersecting)) revealMore()
-    })
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) revealMore()
+      },
+      // Observe within the fixed-height scroll container, not the viewport.
+      { root: listRef.current ?? null },
+    )
     observer.observe(node)
 
     return () => observer.disconnect()
@@ -284,7 +294,10 @@ export default function DockingPanel({
       )}
 
       {status === 'done' && fragments.length > 0 && (
-        <ul className="mt-6 rounded-md border border-hairline bg-paper">
+        <ul
+          ref={listRef}
+          className="mt-6 max-h-[26rem] overflow-y-auto rounded-md border border-hairline bg-paper"
+        >
           {visibleFragments.map((frag) => {
             const state = docking[frag.chembl_id]
             const busy = state != null && !isTerminal(state.phase)
@@ -298,9 +311,15 @@ export default function DockingPanel({
                 <div className="min-w-0 flex-1">
                   {/* Identity — id + name on one calm line. */}
                   <div className="flex items-baseline gap-2">
-                    <span className="flex-none font-mono text-xs text-accent">
-                      {frag.chembl_id}
-                    </span>
+                    <a
+                      href={`${CHEMBL_BASE_URL}${frag.chembl_id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex-none font-mono text-xs text-accent transition-colors hover:underline"
+                      title={`View ${frag.chembl_id} on ChEMBL`}
+                    >
+                      {frag.chembl_id} ↗
+                    </a>
                     {frag.name && (
                       <span className="truncate text-sm text-ink">{frag.name}</span>
                     )}
