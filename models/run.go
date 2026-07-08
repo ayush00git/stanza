@@ -64,6 +64,17 @@ type PocketAnalysis struct {
 	Context        *MutantPocketContext `json:"context,omitempty"`
 }
 
+// LigandDock is one molecule docked into both tracks of a run (Stage 4): the
+// resistance pocket of the WT structure and of the mutant structure.
+type LigandDock struct {
+	SMILES        string  `json:"smiles"`
+	WTScore       float64 `json:"wt_score"`     // Vina affinity (kcal/mol); more negative = stronger
+	MutantScore   float64 `json:"mutant_score"` // Vina affinity (kcal/mol)
+	Selectivity   float64 `json:"selectivity"`  // wt_score - mutant_score; large positive spares WT
+	WTPosePDB     string  `json:"wt_pose_pdb,omitempty"`
+	MutantPosePDB string  `json:"mutant_pose_pdb,omitempty"`
+}
+
 // Run is a resistance-design run. Stage 1 populates WTStructure.
 type Run struct {
 	ID          string             `json:"id"`
@@ -74,6 +85,7 @@ type Run struct {
 	WTStructure *WTStructure       `json:"wt_structure,omitempty"`
 	Mutagenesis *MutagenesisResult `json:"mutagenesis,omitempty"`
 	Pockets     *PocketAnalysis    `json:"pockets,omitempty"`
+	Docks       []LigandDock       `json:"docks,omitempty"`
 	Error       string             `json:"error,omitempty"`
 	CreatedAt   string             `json:"created_at"`
 }

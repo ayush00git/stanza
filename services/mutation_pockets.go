@@ -335,3 +335,6 @@ func absInt(x int) int {
 
 // round1 rounds to one decimal place to keep the delta payload tidy.
 func round1(x float64) float64 { return math.Round(x*10) / 10 }
+
+// round2 rounds to two decimal places (used for docking scores/selectivity).
+func round2(x float64) float64 { return math.Round(x*100) / 100 }
