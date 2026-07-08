@@ -270,6 +270,9 @@ func GenerateRunHandler(c *gin.Context) {
 	}
 	DefaultRunStore.Put(run)
 
+	if candidates == nil {
+		candidates = []models.Candidate{}
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"run_id":     id,
 		"candidates": candidates,

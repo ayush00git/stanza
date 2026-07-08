@@ -1,7 +1,9 @@
-# Python dependencies for the Stage-2 mutagenesis helper (scripts/mutate.py).
+# Python dependencies for the Stanza helper scripts.
 # Install with:  pip install -r scripts/requirements.txt
 #
-# The Go backend shells out to `python3 scripts/mutate.py` to apply a single
-# side-chain point mutation with PDBFixer. These are the only runtime deps.
+# The Go backend shells out to these:
+#   scripts/mutate.py   (Stage 2) — single side-chain point mutation via PDBFixer.
+#   scripts/validate.py (Stage 5) — RDKit SMILES validation + drug-likeness filter.
 openmm
 pdbfixer
+rdkit

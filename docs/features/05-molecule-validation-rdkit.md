@@ -1,8 +1,14 @@
 # Stanza — Molecule Validation & Drug-Likeness
 
-**Status: BUILD** · A fast RDKit pre-filter that parses, canonicalizes, and
+**Status: DONE** · A fast RDKit pre-filter that parses, canonicalizes, and
 dedupes proposed SMILES, then drops invalid / duplicate / non-drug-like
 molecules before they reach the expensive docking stage.
+
+Implemented as `scripts/validate.py` (RDKit; reads a JSON batch on stdin, emits
+one verdict per input molecule) behind the Go wrapper `services.ValidateSMILES`
+(`services/validation.go`), mirroring the `scripts/mutate.py` shell-out pattern.
+Stage 6's `GenerateCandidates` runs every Claude proposal through it and forwards
+only the `kept` molecules to `run.Candidates`. The design below is what shipped.
 
 ---
 
@@ -23,12 +29,12 @@ allowed downstream — each tagged with the drug-likeness numbers
 
 ## Current state
 
-Nothing here exists yet.
+Built as of Stage 5 — see the status note above. The context that shaped it:
 
-- **No cheminformatics anywhere.** The Go backend (Gin, with `uuid`) has no
-  RDKit, no QED / Ro5 / SA scoring, and no SMILES sanitization. Go has no
-  practical cheminformatics library, so this logic cannot live in the Go
-  process.
+- **No cheminformatics in Go.** The Go backend (Gin, with `uuid`) has no RDKit,
+  no QED / Ro5 / SA scoring, and no SMILES sanitization. Go has no practical
+  cheminformatics library, so this logic lives in Python + RDKit and Go shells
+  out to it — the first Python cheminformatics step in the system.
 - **Molecules are library fragments, not generated.** Today a molecule is a
   `models.Fragment{ChemblID, Name, SMILES, MolWeight, LogP, Similarity}` pulled
   from a fixed ChEMBL lookup per pocket. Those SMILES are pre-vetted by their

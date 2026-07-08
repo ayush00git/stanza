@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"sort"
 	"strings"
@@ -144,19 +145,20 @@ func buildGenerationPrompt(pctx *models.MutantPocketContext, mutation models.Mut
 }
 
 // GenerateCandidates is Stage 6. It asks Claude for up to n drug-like molecules
-// aimed at the run's mutant resistance pocket and returns them as SMILES WITHOUT
-// docking. Docking is the slow step, so it is deliberately deferred: the caller
-// docks a molecule on demand via DockLigandDualTrack (Stage 4) when the user picks
-// one, the same list-then-dock flow used for ChEMBL fragments.
+// aimed at the run's mutant resistance pocket, runs the proposals through the
+// Stage-5 RDKit pre-filter, and returns the validated survivors as scored
+// Candidates WITHOUT docking. Docking is the slow step, so it is deliberately
+// deferred: the caller docks a molecule on demand via DockLigandDualTrack (Stage 4)
+// when the user picks one, the same list-then-dock flow used for ChEMBL fragments.
 //
 // Molecules already docked for this run are passed to Claude as scored history, so
 // calling this again after some docks acts as an informal, user-driven selectivity
 // feedback loop. Requires the run's structures (Stage 2); it runs Stage-3 pocket
-// analysis first if needed. New proposals are deduped against everything already
-// docked or proposed, merged into run.Candidates, and the new ones are returned. mu
-// guards every read/write of the run's mutable fields so it is safe under
-// concurrent handlers.
-func GenerateCandidates(ctx context.Context, run *models.Run, n int, mu *sync.Mutex) ([]string, error) {
+// analysis first if needed. The RDKit filter drops invalid, duplicate (run-scoped
+// by InChIKey), and non-drug-like proposals; the kept ones are merged into
+// run.Candidates and returned. mu guards every read/write of the run's mutable
+// fields so it is safe under concurrent handlers.
+func GenerateCandidates(ctx context.Context, run *models.Run, n int, mu *sync.Mutex) ([]models.Candidate, error) {
 	if n <= 0 {
 		n = 4
 	}
@@ -183,16 +185,16 @@ func GenerateCandidates(ctx context.Context, run *models.Run, n int, mu *sync.Mu
 		mu.Unlock()
 	}
 
-	// Snapshot the pocket context, the scored history, and the SMILES to skip.
+	// Snapshot the pocket context, the scored history, and the identities already
+	// known for the run (so the RDKit filter dedupes across calls, not just batches).
 	mu.Lock()
 	pctx := run.Pockets.Context
 	history := append([]models.LigandDock(nil), run.Docks...)
-	seen := make(map[string]bool, len(run.Docks)+len(run.Candidates))
-	for _, d := range run.Docks {
-		seen[d.SMILES] = true
-	}
+	seenKeys := make([]string, 0, len(run.Candidates))
 	for _, c := range run.Candidates {
-		seen[c] = true
+		if c.InChIKey != "" {
+			seenKeys = append(seenKeys, c.InChIKey)
+		}
 	}
 	mu.Unlock()
 	if pctx == nil {
@@ -204,19 +206,53 @@ func GenerateCandidates(ctx context.Context, run *models.Run, n int, mu *sync.Mu
 		return nil, err
 	}
 
-	// Keep only novel, non-empty proposals and add them to the run's candidate pool.
-	var fresh []string
-	mu.Lock()
-	for _, smi := range proposed {
-		smi = strings.TrimSpace(smi)
-		if smi == "" || seen[smi] {
-			continue
-		}
-		seen[smi] = true
-		fresh = append(fresh, smi)
-		run.Candidates = append(run.Candidates, smi)
+	// Stage 5: RDKit pre-filter — parse, canonicalize, dedupe, and drug-likeness
+	// gate, so the dock budget is spent only on viable, unique molecules.
+	verdicts, err := ValidateSMILES(ctx, run.ID, proposed, seenKeys)
+	if err != nil {
+		return nil, fmt.Errorf("generation: validation: %w", err)
 	}
+
+	var fresh []models.Candidate
+	dropped := make(map[string]int)
+	for _, v := range verdicts {
+		if v.Kept {
+			fresh = append(fresh, verdictToCandidate(v))
+		} else {
+			dropped[v.DropReason]++
+		}
+	}
+	log.Printf("[gen:%s] validation: %d proposed, %d kept, dropped %v", shortID(run.ID), len(verdicts), len(fresh), dropped)
+
+	mu.Lock()
+	run.Candidates = append(run.Candidates, fresh...)
 	mu.Unlock()
 
 	return fresh, nil
+}
+
+// verdictToCandidate projects a kept RDKit verdict onto the stored Candidate shape.
+func verdictToCandidate(v MoleculeVerdict) models.Candidate {
+	c := models.Candidate{SMILES: v.SMILES, InChIKey: v.InChIKey, SAScore: v.SAScore}
+	if v.QED != nil {
+		c.QED = *v.QED
+	}
+	if v.RO5Pass != nil {
+		c.RO5Pass = *v.RO5Pass
+	}
+	if v.MolWeight != nil {
+		c.MolWeight = *v.MolWeight
+	}
+	if v.LogP != nil {
+		c.LogP = *v.LogP
+	}
+	return c
+}
+
+// shortID returns a log-friendly prefix of a run ID.
+func shortID(id string) string {
+	if len(id) > 8 {
+		return id[:8]
+	}
+	return id
 }

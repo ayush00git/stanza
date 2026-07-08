@@ -75,6 +75,20 @@ type LigandDock struct {
 	MutantPosePDB string  `json:"mutant_pose_pdb,omitempty"`
 }
 
+// Candidate is a Stage-6 molecule proposed by Claude that passed the Stage-5 RDKit
+// pre-filter (valid, unique, drug-like), awaiting on-demand docking. SMILES is the
+// RDKit canonical form; the drug-likeness numbers are surfaced in the UI and feed
+// selectivity ranking. SAScore is nil when the optional SA scorer is unavailable.
+type Candidate struct {
+	SMILES    string   `json:"smiles"`
+	InChIKey  string   `json:"inchikey"`
+	QED       float64  `json:"qed"`
+	RO5Pass   bool     `json:"ro5_pass"`
+	SAScore   *float64 `json:"sa_score,omitempty"`
+	MolWeight float64  `json:"mol_weight"`
+	LogP      float64  `json:"logp"`
+}
+
 // Run is a resistance-design run. Stage 1 populates WTStructure.
 type Run struct {
 	ID          string             `json:"id"`
@@ -86,7 +100,7 @@ type Run struct {
 	Mutagenesis *MutagenesisResult `json:"mutagenesis,omitempty"`
 	Pockets     *PocketAnalysis    `json:"pockets,omitempty"`
 	Docks       []LigandDock       `json:"docks,omitempty"`
-	Candidates  []string           `json:"candidates,omitempty"` // Stage-6 Claude proposals awaiting on-demand docking
+	Candidates  []Candidate        `json:"candidates,omitempty"` // Stage-6 proposals that passed Stage-5 validation, awaiting on-demand docking
 	Error       string             `json:"error,omitempty"`
 	CreatedAt   string             `json:"created_at"`
 }

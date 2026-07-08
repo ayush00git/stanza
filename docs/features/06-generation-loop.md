@@ -14,11 +14,15 @@ The shipped design **decouples proposal from docking**. Docking (Vina, ~30–60 
 × two tracks) is the entire cost, and blocking a generate call on it is what made the earlier
 in-loop version take minutes. So the two steps are separate endpoints:
 
-- **`POST /runs/:id/generate`** → one Claude call; returns the proposed SMILES immediately as
-  `{ "run_id": "...", "candidates": ["<SMILES>", ...] }`. **No docking.** Body `{ "n": <int> }`
-  is optional (how many to request, capped at `maxGenPerCall`). Runs Stage-3 pocket analysis
-  first if it hasn't been done. New proposals are deduped against everything already docked or
-  proposed and merged into `run.candidates`, so `GET /runs/:id` rehydrates them after a reload.
+- **`POST /runs/:id/generate`** → one Claude call, then the Stage-5 RDKit pre-filter
+  (`services.ValidateSMILES` → `scripts/validate.py`: parse, canonicalize, dedupe by InChIKey,
+  drug-likeness gate). Returns the validated survivors as **scored** candidates immediately:
+  `{ "run_id": "...", "candidates": [{ "smiles", "inchikey", "qed", "ro5_pass", "sa_score",
+  "mol_weight", "logp" }, ...] }`. **No docking.** Body `{ "n": <int> }` is optional (how many
+  to request, capped at `maxGenPerCall`). Runs Stage-3 pocket analysis first if it hasn't been
+  done. Dedupe is run-scoped (the InChIKeys already in `run.candidates` are passed to the
+  validator as `seen`), and kept molecules are merged into `run.candidates`, so `GET /runs/:id`
+  rehydrates them after a reload.
 - **`POST /runs/:id/dock`** (Stage 4 — already synchronous and per-SMILES cached) → the
   frontend docks one molecule on demand when the user selects it and hits enter. Same
   list-then-dock UX as the ChEMBL fragment panel (`app/src/components/viewer/DockingPanel.tsx`):
