@@ -60,17 +60,59 @@ func RunFpocket(structureURL string) ([]models.Pocket, error) {
 		return nil, fmt.Errorf("fpocket: downloaded file missing or empty at %s", structurePath)
 	}
 
+	return analyzeStructureFile(structurePath)
+}
+
+// RunFpocketFile runs fpocket on an existing LOCAL structure file (e.g. a
+// generated wt/mutant PDB) and returns pockets sorted by druggability.
+func RunFpocketFile(structurePath string) ([]models.Pocket, error) {
+	if structurePath == "" {
+		return nil, fmt.Errorf("fpocket: empty structure path")
+	}
+
+	info, statErr := os.Stat(structurePath)
+	if statErr != nil || info.Size() == 0 {
+		return nil, fmt.Errorf("fpocket: structure file missing or empty at %s", structurePath)
+	}
+
+	localTmpParent := "./tmp"
+	if err := os.MkdirAll(localTmpParent, 0755); err != nil {
+		return nil, fmt.Errorf("fpocket: failed to create tmp dir: %w", err)
+	}
+
+	tmpDir, err := os.MkdirTemp(localTmpParent, "fpocket-*")
+	if err != nil {
+		return nil, fmt.Errorf("fpocket: failed to create run dir: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Copy the input file into the tmp dir so fpocket's `_out` directory is
+	// written next to our copy rather than littering the caller's directory.
+	copiedPath := filepath.Join(tmpDir, "structure"+filepath.Ext(structurePath))
+	if err := copyFile(structurePath, copiedPath); err != nil {
+		return nil, fmt.Errorf("fpocket: failed to copy structure file: %w", err)
+	}
+
+	return analyzeStructureFile(copiedPath)
+}
+
+// analyzeStructureFile runs fpocket on a local structure file that already sits
+// in a writable directory, parses its output, and returns the enriched pockets
+// sorted by druggability. The caller owns creating/cleaning the directory.
+func analyzeStructureFile(structurePath string) ([]models.Pocket, error) {
+	workDir := filepath.Dir(structurePath)
+
 	// Run fpocket
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "fpocket", "-f", filepath.Base(structurePath))
-	cmd.Dir = tmpDir
+	cmd.Dir = workDir
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("fpocket: execution failed: %w. Output: %s", err, string(output))
 	}
 
-	outDir := filepath.Join(tmpDir, strings.TrimSuffix(filepath.Base(structurePath), filepath.Ext(structurePath)) + "_out")
+	outDir := filepath.Join(workDir, strings.TrimSuffix(filepath.Base(structurePath), filepath.Ext(structurePath)) + "_out")
 	if _, err := os.Stat(outDir); os.IsNotExist(err) {
 		return nil, fmt.Errorf("fpocket: output directory not found")
 	}
@@ -143,6 +185,26 @@ func RunFpocket(structureURL string) ([]models.Pocket, error) {
 }
 
 // ---------------- Helper Functions ----------------
+
+// copyFile copies the contents of src into a new file at dst.
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return fmt.Errorf("open source failed: %w", err)
+	}
+	defer in.Close()
+
+	out, err := os.Create(dst)
+	if err != nil {
+		return fmt.Errorf("file create failed: %w", err)
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		os.Remove(dst)
+		return fmt.Errorf("copy failed: %w", err)
+	}
+	return out.Close()
+}
 
 func downloadAndVerify(url, destPath string) error {
 	resp, err := fpocketClient.Get(url)
