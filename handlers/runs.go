@@ -218,6 +218,44 @@ func ListRunDocksHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"docks": docks})
 }
 
+type generateRunBody struct {
+	Rounds int `json:"rounds"`
+	N      int `json:"n"`
+}
+
+// GenerateRunHandler handles POST /runs/:id/generate — Stage 6. It runs the
+// Claude-orchestrated generate → dock → score → feed-back loop for a run and
+// returns the resulting selectivity leaderboard. Runs synchronously.
+func GenerateRunHandler(c *gin.Context) {
+	id := c.Param("id")
+	run, ok := DefaultRunStore.Get(id)
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "run not found"})
+		return
+	}
+
+	var body generateRunBody
+	// A body is optional; ignore decode errors and fall back to defaults.
+	_ = json.NewDecoder(c.Request.Body).Decode(&body)
+
+	before := len(run.Docks)
+	if err := services.RunGenerationLoop(c.Request.Context(), run, body.Rounds, body.N); err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+	DefaultRunStore.Put(run)
+
+	docks := run.Docks
+	if docks == nil {
+		docks = []models.LigandDock{}
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"generated": len(run.Docks) - before,
+		"total":     len(run.Docks),
+		"docks":     docks,
+	})
+}
+
 // GetRunHandler handles GET /runs/:id.
 func GetRunHandler(c *gin.Context) {
 	id := c.Param("id")

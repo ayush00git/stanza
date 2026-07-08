@@ -5,9 +5,14 @@ import (
 
 	"github.com/ayush00git/stanza/handlers"
 	"github.com/gin-gonic/gin"
+	"github.com/joho/godotenv"
 )
 
 func main() {
+	// Load .env (e.g. ANTHROPIC_API_KEY for the generation loop) if present;
+	// real environment variables still take precedence.
+	_ = godotenv.Load()
+
 	r := gin.Default()
 
 	r.GET("/health", func(c *gin.Context) {
@@ -48,6 +53,8 @@ func main() {
 	// Stage-4 dual-track docking (WT + mutant) for a run.
 	r.POST("/runs/:id/dock", handlers.DockRunHandler)
 	r.GET("/runs/:id/docks", handlers.ListRunDocksHandler)
+	// Stage-6 Claude-orchestrated molecule generation loop for a run.
+	r.POST("/runs/:id/generate", handlers.GenerateRunHandler)
 
 	r.Run(":8080")
 }
