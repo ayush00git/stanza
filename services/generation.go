@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"runtime"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/anthropics/anthropic-sdk-go"
 
@@ -148,7 +150,12 @@ func buildGenerationPrompt(pctx *models.MutantPocketContext, mutation models.Mut
 // cache), the results feed the next round, and the run's dock leaderboard is left
 // sorted by selectivity. Requires the run's structures (Stage 2); it runs Stage-3
 // pocket analysis first if needed.
-func RunGenerationLoop(ctx context.Context, run *models.Run, rounds, n int) error {
+//
+// Molecules within a round are docked in parallel (bounded by CPU count), and mu
+// guards every read/write of the run's mutable fields (Docks, Generation) so it is
+// safe to run in a background goroutine while handlers read the run under the same
+// mutex. Callers update run.Generation.Status before/after this returns.
+func RunGenerationLoop(ctx context.Context, run *models.Run, rounds, n int, mu *sync.Mutex) error {
 	if rounds <= 0 {
 		rounds = 2
 	}
@@ -161,6 +168,7 @@ func RunGenerationLoop(ctx context.Context, run *models.Run, rounds, n int) erro
 	if n > maxGenPerRound {
 		n = maxGenPerRound
 	}
+	setGenStatus(mu, run, func(g *models.GenerationStatus) { g.Rounds = rounds })
 
 	if run.Mutagenesis == nil {
 		return fmt.Errorf("generation: run has no structures (run Stage-2 mutagenesis first)")
@@ -170,38 +178,106 @@ func RunGenerationLoop(ctx context.Context, run *models.Run, rounds, n int) erro
 		if err != nil {
 			return fmt.Errorf("generation: pocket analysis: %w", err)
 		}
+		mu.Lock()
 		run.Pockets = pa
+		mu.Unlock()
 	}
 	if run.Pockets.Context == nil {
 		return fmt.Errorf("generation: no resistance pocket to design against")
 	}
 
+	// Prepare both receptor PDBQTs once, up front, so the parallel docks below reuse
+	// the cached files instead of re-preparing (and racing on) them.
+	if _, err := ensureReceptorPDBQT(run.ID, "wt"); err != nil {
+		return fmt.Errorf("generation: receptor prep (wt): %w", err)
+	}
+	if _, err := ensureReceptorPDBQT(run.ID, "mutant"); err != nil {
+		return fmt.Errorf("generation: receptor prep (mutant): %w", err)
+	}
+
 	seen := make(map[string]bool)
+	mu.Lock()
 	for _, d := range run.Docks {
 		seen[d.SMILES] = true
 	}
+	mu.Unlock()
+
+	// Each dock uses screenCPU cores; run about NumCPU/screenCPU molecules at once.
+	workers := max(1, runtime.NumCPU()/screenCPU)
 
 	for r := 0; r < rounds; r++ {
-		candidates, err := ProposeMolecules(ctx, run.Pockets.Context, run.Mutation, run.Docks, n)
+		setGenStatus(mu, run, func(g *models.GenerationStatus) { g.Round = r + 1 })
+
+		mu.Lock()
+		history := append([]models.LigandDock(nil), run.Docks...)
+		mu.Unlock()
+
+		candidates, err := ProposeMolecules(ctx, run.Pockets.Context, run.Mutation, history, n)
 		if err != nil {
 			return fmt.Errorf("generation round %d: %w", r+1, err)
 		}
+
+		// Keep only novel candidates (dedupe against everything already tried).
+		var todo []string
 		for _, smi := range candidates {
 			smi = strings.TrimSpace(smi)
-			if smi == "" || seen[smi] {
+			if smi == "" {
 				continue
 			}
-			seen[smi] = true
-			dock, derr := DockLigandDualTrack(ctx, run, smi)
-			if derr != nil {
-				// Invalid SMILES or a failed dock: skip the molecule, keep the loop going.
-				continue
+			mu.Lock()
+			dup := seen[smi]
+			if !dup {
+				seen[smi] = true
 			}
-			run.Docks = append(run.Docks, *dock)
+			mu.Unlock()
+			if !dup {
+				todo = append(todo, smi)
+			}
 		}
+
+		// Dock the novel candidates in parallel.
+		sem := make(chan struct{}, workers)
+		var wg sync.WaitGroup
+		for _, smi := range todo {
+			wg.Add(1)
+			sem <- struct{}{}
+			go func() {
+				defer wg.Done()
+				defer func() { <-sem }()
+				dock, derr := DockLigandDualTrack(ctx, run, smi)
+				if derr != nil {
+					// Invalid SMILES or a failed dock: skip it, keep the loop going.
+					return
+				}
+				mu.Lock()
+				run.Docks = append(run.Docks, *dock)
+				if run.Generation != nil {
+					g := *run.Generation
+					g.Docked = len(run.Docks)
+					run.Generation = &g
+				}
+				mu.Unlock()
+			}()
+		}
+		wg.Wait()
 	}
 
 	// Leave the leaderboard ranked by selectivity (most mutant-selective first).
+	mu.Lock()
 	sort.Slice(run.Docks, func(i, j int) bool { return run.Docks[i].Selectivity > run.Docks[j].Selectivity })
+	mu.Unlock()
 	return nil
+}
+
+// setGenStatus replaces run.Generation with an updated copy under mu, so a reader
+// holding a snapshot of the old pointer never observes a half-written struct.
+func setGenStatus(mu *sync.Mutex, run *models.Run, fn func(*models.GenerationStatus)) {
+	mu.Lock()
+	defer mu.Unlock()
+	g := models.GenerationStatus{}
+	if run.Generation != nil {
+		g = *run.Generation
+	}
+	fn(&g)
+	run.Generation = &g
 }

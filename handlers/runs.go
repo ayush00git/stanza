@@ -1,11 +1,13 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -14,6 +16,11 @@ import (
 	"github.com/ayush00git/stanza/models"
 	"github.com/ayush00git/stanza/services"
 )
+
+// genMu guards a run's mutable fields (Docks, Pockets, Generation) while the
+// background generation loop mutates them, so handlers that read or write the same
+// run stay race-free. A single mutex is fine at this scale.
+var genMu sync.Mutex
 
 // createRunBody is the POST /runs request payload.
 type createRunBody struct {
@@ -120,8 +127,11 @@ func GetRunPocketsHandler(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "run not found"})
 		return
 	}
-	if run.Pockets != nil {
-		c.JSON(http.StatusOK, run.Pockets)
+	genMu.Lock()
+	existing := run.Pockets
+	genMu.Unlock()
+	if existing != nil {
+		c.JSON(http.StatusOK, existing)
 		return
 	}
 	if run.Mutagenesis == nil {
@@ -134,7 +144,9 @@ func GetRunPocketsHandler(c *gin.Context) {
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
 	}
+	genMu.Lock()
 	run.Pockets = pa
+	genMu.Unlock()
 	DefaultRunStore.Put(run)
 	c.JSON(http.StatusOK, pa)
 }
@@ -171,25 +183,32 @@ func DockRunHandler(c *gin.Context) {
 	}
 
 	// Cache: the same molecule re-docked against this run is returned as-is.
+	genMu.Lock()
 	for i := range run.Docks {
 		if run.Docks[i].SMILES == smiles {
-			c.JSON(http.StatusOK, run.Docks[i])
+			hit := run.Docks[i]
+			genMu.Unlock()
+			c.JSON(http.StatusOK, hit)
 			return
 		}
 	}
+	pocketsReady := run.Pockets != nil
+	genMu.Unlock()
 
 	if run.Mutagenesis == nil {
 		c.JSON(http.StatusConflict, gin.H{"error": "run has no mutant structure yet"})
 		return
 	}
 	// Ensure Stage-3 pocket analysis has run (docking needs the pocket box).
-	if run.Pockets == nil {
+	if !pocketsReady {
 		pa, err := services.BuildPocketAnalysis(c.Request.Context(), run)
 		if err != nil {
 			c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("pocket analysis: %v", err)})
 			return
 		}
+		genMu.Lock()
 		run.Pockets = pa
+		genMu.Unlock()
 	}
 
 	res, err := services.DockLigandDualTrack(c.Request.Context(), run, smiles)
@@ -197,7 +216,9 @@ func DockRunHandler(c *gin.Context) {
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
 	}
+	genMu.Lock()
 	run.Docks = append(run.Docks, *res)
+	genMu.Unlock()
 	DefaultRunStore.Put(run)
 	c.JSON(http.StatusCreated, res)
 }
@@ -211,7 +232,9 @@ func ListRunDocksHandler(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "run not found"})
 		return
 	}
+	genMu.Lock()
 	docks := run.Docks
+	genMu.Unlock()
 	if docks == nil {
 		docks = []models.LigandDock{}
 	}
@@ -223,9 +246,11 @@ type generateRunBody struct {
 	N      int `json:"n"`
 }
 
-// GenerateRunHandler handles POST /runs/:id/generate — Stage 6. It runs the
-// Claude-orchestrated generate → dock → score → feed-back loop for a run and
-// returns the resulting selectivity leaderboard. Runs synchronously.
+// GenerateRunHandler handles POST /runs/:id/generate — Stage 6. It starts the
+// Claude-orchestrated generate → dock → score → feed-back loop in the background
+// and returns 202 immediately; poll GET /runs/:id for progress (run.generation)
+// and the growing selectivity leaderboard (run.docks). Docking is slow, so the
+// loop must not block the request.
 func GenerateRunHandler(c *gin.Context) {
 	id := c.Param("id")
 	run, ok := DefaultRunStore.Get(id)
@@ -238,21 +263,42 @@ func GenerateRunHandler(c *gin.Context) {
 	// A body is optional; ignore decode errors and fall back to defaults.
 	_ = json.NewDecoder(c.Request.Body).Decode(&body)
 
-	before := len(run.Docks)
-	if err := services.RunGenerationLoop(c.Request.Context(), run, body.Rounds, body.N); err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+	genMu.Lock()
+	if run.Generation != nil && run.Generation.Status == "running" {
+		genMu.Unlock()
+		c.JSON(http.StatusConflict, gin.H{"error": "a generation is already running for this run"})
 		return
 	}
+	run.Generation = &models.GenerationStatus{
+		Status:    "running",
+		StartedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	genMu.Unlock()
 	DefaultRunStore.Put(run)
 
-	docks := run.Docks
-	if docks == nil {
-		docks = []models.LigandDock{}
-	}
-	c.JSON(http.StatusOK, gin.H{
-		"generated": len(run.Docks) - before,
-		"total":     len(run.Docks),
-		"docks":     docks,
+	// Fresh context: the loop outlives this request.
+	go func() {
+		err := services.RunGenerationLoop(context.Background(), run, body.Rounds, body.N, &genMu)
+		genMu.Lock()
+		g := models.GenerationStatus{}
+		if run.Generation != nil {
+			g = *run.Generation
+		}
+		if err != nil {
+			g.Status = "error"
+			g.Error = err.Error()
+		} else {
+			g.Status = "done"
+		}
+		run.Generation = &g
+		genMu.Unlock()
+		DefaultRunStore.Put(run)
+	}()
+
+	c.JSON(http.StatusAccepted, gin.H{
+		"status": "running",
+		"run_id": id,
+		"poll":   "/runs/" + id,
 	})
 }
 
@@ -264,7 +310,12 @@ func GetRunHandler(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "run not found"})
 		return
 	}
-	c.JSON(http.StatusOK, run)
+	// Snapshot under genMu so a concurrent generation loop isn't mutating the run
+	// while it's being marshalled.
+	genMu.Lock()
+	snap := *run
+	genMu.Unlock()
+	c.JSON(http.StatusOK, &snap)
 }
 
 // ListRunsHandler handles GET /runs, returning all runs newest-first.

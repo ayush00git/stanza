@@ -75,6 +75,17 @@ type LigandDock struct {
 	MutantPosePDB string  `json:"mutant_pose_pdb,omitempty"`
 }
 
+// GenerationStatus tracks the Stage-6 generation loop, which runs in the
+// background so the request doesn't block on docking.
+type GenerationStatus struct {
+	Status    string `json:"status"` // "running" | "done" | "error"
+	Rounds    int    `json:"rounds"`
+	Round     int    `json:"round"`   // current round (1-based)
+	Docked    int    `json:"docked"`  // molecules docked so far this run
+	Error     string `json:"error,omitempty"`
+	StartedAt string `json:"started_at"`
+}
+
 // Run is a resistance-design run. Stage 1 populates WTStructure.
 type Run struct {
 	ID          string             `json:"id"`
@@ -86,6 +97,7 @@ type Run struct {
 	Mutagenesis *MutagenesisResult `json:"mutagenesis,omitempty"`
 	Pockets     *PocketAnalysis    `json:"pockets,omitempty"`
 	Docks       []LigandDock       `json:"docks,omitempty"`
+	Generation  *GenerationStatus  `json:"generation,omitempty"`
 	Error       string             `json:"error,omitempty"`
 	CreatedAt   string             `json:"created_at"`
 }
