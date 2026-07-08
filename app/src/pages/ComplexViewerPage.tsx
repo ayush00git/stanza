@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import type { BindingSiteResult, Complex, Pocket } from '../lib/api'
+import type { BindingSiteResult, Complex, DockedPose, Pocket } from '../lib/api'
 import { getBindingSites, getComplex } from '../lib/api'
 import { plddtBands } from '../lib/plddt'
 import MolstarViewer, { type HighlightResidue } from '../components/viewer/MolstarViewer'
@@ -25,19 +25,25 @@ const DEFAULT_REPRESENTATION = 'spacefill'
 
 type BsStatus = 'loading' | 'done' | 'error'
 
-/** A viewer panel that shows the structure, or a "Not available" placeholder. */
+/**
+ * A single viewer panel: renders the Mol* structure, or a "Not available"
+ * placeholder when the structure URL is missing. The docked-ligand pose (raw
+ * PDB string) is threaded straight through to the viewer.
+ */
 function StructurePanel({
   url,
   label,
   plddt,
   representation,
   highlight,
+  pose,
 }: {
   url?: string
   label: string
   plddt?: number
   representation: string
   highlight?: HighlightResidue[]
+  pose?: string | null
 }) {
   if (!url) {
     return (
@@ -60,14 +66,50 @@ function StructurePanel({
       plddt={plddt}
       representation={representation}
       highlight={highlight}
+      pose={pose}
     />
   )
 }
 
+/** A tidy label/value cell for the header metadata strip. */
+function MetaItem({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className="font-mono text-[9px] uppercase tracking-[0.14em] text-muted">{label}</span>
+      <span className="text-[13px] text-ink">{children}</span>
+    </div>
+  )
+}
+
 /**
- * ComplexViewerPage — route /structure/:id. Shows the AlphaFold monomer and
- * dimer in Mol* (collapsible, so they can be minimised out of the way) and
- * runs fpocket binding-site analysis on both structures as the page loads.
+ * Subtle caption shown beneath a viewer while a docked pose is loaded into it.
+ * Surfaces which pocket the ligand sits in and its affinity, with a way out.
+ */
+function PoseCaption({ pose, onClear }: { pose: DockedPose; onClear: () => void }) {
+  return (
+    <div className="flex items-center justify-between gap-3 border-t border-hairline bg-accent-soft px-3 py-1.5">
+      <span className="min-w-0 truncate font-mono text-[10px] uppercase tracking-[0.1em] text-accent">
+        Docked pose · P{pose.pocket_id}
+        {pose.binding_affinity != null && ` · ${pose.binding_affinity} kcal/mol`}
+        {pose.chembl_id && ` · ${pose.chembl_id}`}
+      </span>
+      <button
+        type="button"
+        onClick={onClear}
+        className="flex-none font-mono text-[10px] uppercase tracking-[0.1em] text-muted transition-colors hover:text-ink"
+      >
+        Clear
+      </button>
+    </div>
+  )
+}
+
+/**
+ * ComplexViewerPage — route /structure/:id. Renders the AlphaFold monomer and
+ * dimer in Mol* (collapsible, default-open) as soon as the fast getComplex
+ * metadata resolves, while the slow fpocket binding-site analysis streams in
+ * below. Selecting a pocket highlights its residues in the matching viewer;
+ * docking a fragment renders the resulting ligand pose in that same viewer.
  */
 export default function ComplexViewerPage() {
   const { id = '' } = useParams()
@@ -76,7 +118,8 @@ export default function ComplexViewerPage() {
   const [representation, setRepresentation] = useState(DEFAULT_REPRESENTATION)
   const [structuresOpen, setStructuresOpen] = useState(true)
 
-  // fpocket analysis lifecycle
+  // fpocket analysis lifecycle — kept fully separate from the structure load
+  // so the viewers never wait on this (slow) request.
   const [bs, setBs] = useState<BindingSiteResult | null>(null)
   const [bsStatus, setBsStatus] = useState<BsStatus>('loading')
   const [bsError, setBsError] = useState<string | null>(null)
@@ -86,6 +129,11 @@ export default function ComplexViewerPage() {
   // structure only; it never toggles off and never clears the other structure.
   const [selectedMonomer, setSelectedMonomer] = useState<Pocket | null>(null)
   const [selectedDimer, setSelectedDimer] = useState<Pocket | null>(null)
+
+  // Docked-ligand pose — also per structure, so each viewer shows the pose that
+  // was docked into it.
+  const [monomerPose, setMonomerPose] = useState<DockedPose | null>(null)
+  const [dimerPose, setDimerPose] = useState<DockedPose | null>(null)
 
   const selectedKeys = useMemo(() => {
     const keys = new Set<string>()
@@ -101,6 +149,12 @@ export default function ComplexViewerPage() {
     else setSelectedDimer(p)
   }
 
+  // Route a finished docking pose into the viewer for its structure.
+  const handlePose = (pose: DockedPose) => {
+    if (pose.source_type === 'monomer') setMonomerPose(pose)
+    else setDimerPose(pose)
+  }
+
   // Each structure's selection routes to its own viewer's highlight; an empty
   // array leaves a viewer un-highlighted until one of its pockets is clicked.
   const monomerHighlight = useMemo<HighlightResidue[]>(
@@ -112,7 +166,9 @@ export default function ComplexViewerPage() {
     [selectedDimer],
   )
 
-  // Metadata (fast) and fpocket analysis (slow) load in parallel on mount.
+  // Metadata (fast) and fpocket analysis (slow) load in parallel on mount and
+  // are tracked in independent state with independent error handling, so the
+  // structure viewers can render the moment getComplex resolves.
   useEffect(() => {
     const ctrl = new AbortController()
 
@@ -128,6 +184,8 @@ export default function ComplexViewerPage() {
 
     setSelectedMonomer(null)
     setSelectedDimer(null)
+    setMonomerPose(null)
+    setDimerPose(null)
     setBs(null)
     setBsError(null)
     setBsStatus('loading')
@@ -146,30 +204,66 @@ export default function ComplexViewerPage() {
     return () => ctrl.abort()
   }, [id])
 
+  // Metadata fields for the header strip — only rendered when present.
+  const metaItems = useMemo(() => {
+    if (!complex) return []
+    const items: { label: string; value: ReactNode }[] = []
+    if (complex.organism) {
+      items.push({ label: 'Organism', value: <span className="italic">{complex.organism}</span> })
+    }
+    if (complex.drug_count != null && complex.drug_count >= 0) {
+      items.push({
+        label: 'Known drugs',
+        value: complex.drug_count === 0 ? 'Undrugged' : `${complex.drug_count}`,
+      })
+    }
+    if (complex.category) items.push({ label: 'Category', value: complex.category })
+    return items
+  }, [complex])
+
   return (
     <div className="flex min-h-screen flex-col bg-paper">
-      {/* Header */}
-      <div className="sticky top-0 z-10 flex flex-none flex-wrap items-center justify-between gap-3 border-b border-hairline bg-paper/90 px-6 py-3 backdrop-blur-sm">
-        <div className="flex min-w-0 items-center gap-4">
-          <Link
-            to="/"
-            className="font-mono text-[11px] uppercase tracking-[0.1em] text-muted transition-colors hover:text-ink"
-          >
-            ← Back
-          </Link>
-          <div className="min-w-0">
-            <h1 className="truncate font-display text-lg font-medium text-ink">
-              {complex?.gene_name || complex?.uniprot_id || id}
-              <span className="ml-2 font-mono text-xs font-normal text-muted">
-                {complex?.uniprot_id || id}
+      {/* Header — target identity plus a tidy metadata strip */}
+      <header className="sticky top-0 z-10 flex-none border-b border-hairline bg-paper/90 backdrop-blur-sm">
+        <div className="mx-auto flex w-full max-w-6xl flex-col gap-3 px-6 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-4">
+              <Link
+                to="/"
+                className="font-mono text-[11px] uppercase tracking-[0.1em] text-muted transition-colors hover:text-ink"
+              >
+                ← Back
+              </Link>
+              <div className="min-w-0">
+                <h1 className="truncate font-display text-xl font-medium text-ink">
+                  {complex?.gene_name || complex?.uniprot_id || id}
+                  <span className="ml-2 font-mono text-xs font-normal text-muted">
+                    {complex?.uniprot_id || id}
+                  </span>
+                </h1>
+                {complex?.protein_name && (
+                  <p className="truncate text-xs text-muted">{complex.protein_name}</p>
+                )}
+              </div>
+            </div>
+            {complex?.is_who_pathogen && (
+              <span className="flex-none rounded-full border border-accent/40 bg-accent-soft px-2.5 py-1 font-mono text-[9px] uppercase tracking-[0.12em] text-accent">
+                WHO pathogen
               </span>
-            </h1>
-            {complex?.protein_name && (
-              <p className="truncate text-xs text-muted">{complex.protein_name}</p>
             )}
           </div>
+
+          {metaItems.length > 0 && (
+            <div className="flex flex-wrap gap-x-8 gap-y-2 border-t border-hairline pt-2.5">
+              {metaItems.map((item) => (
+                <MetaItem key={item.label} label={item.label}>
+                  {item.value}
+                </MetaItem>
+              ))}
+            </div>
+          )}
         </div>
-      </div>
+      </header>
 
       {error ? (
         <div className="flex flex-1 items-center justify-center p-6 text-center">
@@ -182,17 +276,20 @@ export default function ComplexViewerPage() {
           </span>
         </div>
       ) : (
-        <>
-          {/* Structures — collapsible, kept compact so the analysis has room */}
-          <section className="flex-none border-b border-hairline">
-            <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-2">
+        <div className="mx-auto flex w-full max-w-6xl flex-col gap-10 px-6 py-8">
+          {/* ── Structures ─────────────────────────────────────────────
+              Renders purely from `complex`; never gated on the fpocket
+              analysis below. Collapsible, but default-open and prominent. */}
+          <section className="flex flex-col">
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <button
                 type="button"
                 onClick={() => setStructuresOpen((v) => !v)}
-                className="font-mono text-[11px] uppercase tracking-[0.12em] text-ink transition-colors hover:text-accent"
+                className="flex items-center gap-2 font-display text-base font-medium text-ink transition-colors hover:text-accent"
                 aria-expanded={structuresOpen}
               >
-                {structuresOpen ? '▾' : '▸'} Structures
+                <span className="font-mono text-xs text-muted">{structuresOpen ? '▾' : '▸'}</span>
+                Structures
               </button>
 
               {structuresOpen && (
@@ -216,30 +313,40 @@ export default function ComplexViewerPage() {
             </div>
 
             {structuresOpen && (
-              <>
-                <div className="flex h-[44vh] flex-col border-t border-hairline md:flex-row">
-                  <div className="flex min-h-0 flex-1 flex-col border-hairline max-md:border-b md:border-r">
+              <div className="mt-4 flex flex-col overflow-hidden rounded-lg border border-hairline bg-paper-deep">
+                {/* Comfortable, side-by-side on md+, stacked on small screens.
+                    Each viewer manages its own loading state internally. */}
+                <div className="flex min-h-[420px] flex-col md:h-[56vh] md:min-h-[460px] md:flex-row">
+                  <div className="flex min-h-[360px] flex-1 flex-col border-hairline max-md:border-b md:min-h-0 md:border-r">
                     <StructurePanel
                       url={complex.monomer_structure_url}
                       label="Monomer · single chain"
                       plddt={complex.monomer_plddt_avg}
                       representation={representation}
                       highlight={monomerHighlight}
+                      pose={monomerPose?.pdb ?? null}
                     />
+                    {monomerPose && (
+                      <PoseCaption pose={monomerPose} onClear={() => setMonomerPose(null)} />
+                    )}
                   </div>
-                  <div className="flex min-h-0 flex-1 flex-col">
+                  <div className="flex min-h-[360px] flex-1 flex-col md:min-h-0">
                     <StructurePanel
                       url={complex.complex_structure_url}
                       label="Dimer · complex"
                       plddt={complex.dimer_plddt_avg}
                       representation={representation}
                       highlight={dimerHighlight}
+                      pose={dimerPose?.pdb ?? null}
                     />
+                    {dimerPose && (
+                      <PoseCaption pose={dimerPose} onClear={() => setDimerPose(null)} />
+                    )}
                   </div>
                 </div>
 
                 {/* pLDDT legend */}
-                <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-1.5 border-t border-hairline px-6 py-2">
+                <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-1.5 border-t border-hairline px-6 py-2.5">
                   <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted">
                     AlphaFold confidence (pLDDT)
                   </span>
@@ -253,20 +360,33 @@ export default function ComplexViewerPage() {
                     </span>
                   ))}
                 </div>
-              </>
+              </div>
             )}
           </section>
 
-          {/* fpocket analysis */}
-          <BindingSitesPanel
-            status={bsStatus}
-            result={bs}
-            error={bsError}
-            selectedKeys={selectedKeys}
-            onSelect={handleSelect}
-            uniprotId={complex.uniprot_id}
-          />
-        </>
+          {/* ── Binding-site analysis ──────────────────────────────────
+              Streams in on its own; shows its own loading/error state while
+              fpocket runs. Fragment docking lives inline in each pocket card
+              and reports finished poses back up via onPose. */}
+          <section className="flex flex-col">
+            <div className="mb-4 flex flex-col gap-1 border-t border-hairline pt-6">
+              <h2 className="font-display text-base font-medium text-ink">Binding-site analysis</h2>
+              <p className="text-xs text-muted">
+                Druggable pockets detected by fpocket. Dock a fragment in any pocket to view its pose
+                above.
+              </p>
+            </div>
+            <BindingSitesPanel
+              status={bsStatus}
+              result={bs}
+              error={bsError}
+              selectedKeys={selectedKeys}
+              onSelect={handleSelect}
+              onPose={handlePose}
+              uniprotId={complex.uniprot_id}
+            />
+          </section>
+        </div>
       )}
     </div>
   )
