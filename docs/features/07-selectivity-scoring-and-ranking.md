@@ -1,9 +1,21 @@
 # Stanza — Selectivity Scoring & Ranking
 
-**BUILD** · Turn paired WT/mutant dock scores into a single, comparable
+**DONE** · Turn paired WT/mutant dock scores into a single, comparable
 **fitness** per molecule — reward binding the *mutant* pocket, penalise binding
-the *wild type* — then rank and select the pool, keeping lineage for provenance
-and for the generation loop's feedback.
+the *wild type* — then rank and select the pool.
+
+Implemented in `scoring/selectivity.go` (`ScoreAndRank`, the `Scores` /
+`RankedMolecule` / `Ranking` types, and the z-score / min-max normalisers) and
+exposed as `GET /runs/:id/ranking` (`handlers.GetRunRankingHandler`), which joins
+each dock to its QED from the run's validated candidates and ranks the run's docked
+molecules by composite fitness. Query params: `norm=zscore|minmax`, `top=<int>`,
+and `wp`/`ws`/`wq` weight overrides.
+
+Adapted to the shipped, no-persistence design: the pool is the run's full dock set.
+There are no generation rounds yet, so the round-scoped pool and the `round` /
+`parent_id` lineage in the spec below are omitted (they return with the autonomous
+loop and stage-8 persistence). The fitness math, sign conventions, normalisation,
+tie-breaks, and JSON shapes below are what shipped.
 
 ---
 
@@ -27,7 +39,8 @@ authority.
 
 ## Current state
 
-There is **no selectivity concept anywhere**.
+Built as of Stage 7 — see the status note above. The context that shaped it (and
+which still describes the separate `/complex` oligomerization dock path):
 
 - Docking (`services/jobs.go`) returns `DockingResult{ BindingAffinity, PosePDB, … }`
   — a **single** Vina affinity against a **single** pocket. There is no WT/mutant

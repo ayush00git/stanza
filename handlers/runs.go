@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/ayush00git/stanza/models"
+	"github.com/ayush00git/stanza/scoring"
 	"github.com/ayush00git/stanza/services"
 )
 
@@ -238,6 +240,47 @@ func ListRunDocksHandler(c *gin.Context) {
 		docks = []models.LigandDock{}
 	}
 	c.JSON(http.StatusOK, gin.H{"docks": docks})
+}
+
+// GetRunRankingHandler handles GET /runs/:id/ranking — Stage 7. It computes the
+// composite selectivity fitness for the run's docked molecules and returns them
+// ranked, most mutant-selective + drug-like first. Fitness blends mutant potency,
+// the selectivity margin (wt_score − mutant_score), and QED (from Stage-5
+// validation), each pool-normalised across the run's docks. Query params:
+// norm=zscore|minmax, top=<int> (how many flagged selected), and wp/ws/wq weight
+// overrides (used only when all three parse).
+func GetRunRankingHandler(c *gin.Context) {
+	id := c.Param("id")
+	run, ok := DefaultRunStore.Get(id)
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "run not found"})
+		return
+	}
+
+	// Snapshot the docks and the QED-by-SMILES lookup (from validated candidates).
+	genMu.Lock()
+	docks := append([]models.LigandDock(nil), run.Docks...)
+	qed := make(map[string]float64, len(run.Candidates))
+	for _, cand := range run.Candidates {
+		qed[cand.SMILES] = cand.QED
+	}
+	genMu.Unlock()
+
+	opts := scoring.Options{
+		Weights: scoring.DefaultWeights(),
+		Norm:    scoring.NormMode(c.Query("norm")),
+	}
+	if top, err := strconv.Atoi(c.Query("top")); err == nil {
+		opts.SelectTop = top
+	}
+	wp, e1 := strconv.ParseFloat(c.Query("wp"), 64)
+	ws, e2 := strconv.ParseFloat(c.Query("ws"), 64)
+	wq, e3 := strconv.ParseFloat(c.Query("wq"), 64)
+	if e1 == nil && e2 == nil && e3 == nil {
+		opts.Weights = scoring.FitnessWeights{Potency: wp, Selectivity: ws, DrugLikeness: wq}
+	}
+
+	c.JSON(http.StatusOK, scoring.ScoreAndRank(id, docks, qed, opts))
 }
 
 type generateRunBody struct {

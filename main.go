@@ -53,7 +53,9 @@ func main() {
 	// Stage-4 dual-track docking (WT + mutant) for a run.
 	r.POST("/runs/:id/dock", handlers.DockRunHandler)
 	r.GET("/runs/:id/docks", handlers.ListRunDocksHandler)
-	// Stage-6 Claude-orchestrated molecule generation loop for a run.
+	// Stage-7 selectivity scoring + ranking: the docked molecules as a fitness leaderboard.
+	r.GET("/runs/:id/ranking", handlers.GetRunRankingHandler)
+	// Stage-6 Claude molecule generation (propose + RDKit filter) for a run.
 	r.POST("/runs/:id/generate", handlers.GenerateRunHandler)
 
 	r.Run(":8080")
