@@ -44,6 +44,7 @@ function PocketRow({
   onSelect,
   uniprotId,
   onPose,
+  structureUrls,
 }: {
   pocket: Pocket
   rank: number
@@ -52,10 +53,16 @@ function PocketRow({
   uniprotId?: string
   // onPose lifts a completed dock up to the page for 3D display.
   onPose?: (pose: DockedPose) => void
+  // Receptor structure URLs, keyed by source type; the pocket docks against
+  // the same structure fpocket detected it in, so its center coords line up.
+  structureUrls?: { monomer?: string; dimer?: string }
 }) {
   const score = Math.max(0, Math.min(1, pocket.druggability_score))
   const residues = pocket.residue_indices?.length ?? 0
   const isTop = rank === 0
+  // Dock against the structure this pocket came from (monomer vs dimer).
+  const proteinPdbPath =
+    pocket.source_type === 'monomer' ? structureUrls?.monomer : structureUrls?.dimer
   return (
     <li
       onClick={() => onSelect(pocket)}
@@ -148,7 +155,13 @@ function PocketRow({
             className="mt-4 border-t border-hairline pt-4"
             onClick={(e) => e.stopPropagation()}
           >
-            <DockingPanel pocket={pocket} uniprotId={uniprotId} onPose={onPose} compact />
+            <DockingPanel
+              pocket={pocket}
+              uniprotId={uniprotId}
+              proteinPdbPath={proteinPdbPath}
+              onPose={onPose}
+              compact
+            />
           </div>
         )}
       </div>
@@ -168,6 +181,7 @@ function PocketColumn({
   onSelect,
   uniprotId,
   onPose,
+  structureUrls,
 }: {
   title: string
   pockets: Pocket[]
@@ -175,6 +189,7 @@ function PocketColumn({
   onSelect: (p: Pocket) => void
   uniprotId?: string
   onPose?: (pose: DockedPose) => void
+  structureUrls?: { monomer?: string; dimer?: string }
 }) {
   const sorted = byDruggability(pockets)
   return (
@@ -200,6 +215,7 @@ function PocketColumn({
               onSelect={onSelect}
               uniprotId={uniprotId}
               onPose={onPose}
+              structureUrls={structureUrls}
             />
           ))}
         </ul>
@@ -221,6 +237,7 @@ export default function BindingSitesPanel({
   onSelect,
   uniprotId,
   onPose,
+  structureUrls,
 }: {
   status: Status
   result: BindingSiteResult | null
@@ -230,6 +247,8 @@ export default function BindingSitesPanel({
   uniprotId?: string
   // onPose lifts a completed dock up to the page for 3D display.
   onPose?: (pose: DockedPose) => void
+  // Receptor structure URLs so each pocket docks against its own structure.
+  structureUrls?: { monomer?: string; dimer?: string }
 }) {
   return (
     <section className="mx-auto w-full max-w-5xl px-6 py-8">
@@ -280,6 +299,7 @@ export default function BindingSitesPanel({
                 onSelect={onSelect}
                 uniprotId={uniprotId}
                 onPose={onPose}
+                structureUrls={structureUrls}
               />
               <PocketColumn
                 title="Monomer"
@@ -288,6 +308,7 @@ export default function BindingSitesPanel({
                 onSelect={onSelect}
                 uniprotId={uniprotId}
                 onPose={onPose}
+                structureUrls={structureUrls}
               />
             </div>
           )}

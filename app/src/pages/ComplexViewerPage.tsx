@@ -384,6 +384,10 @@ export default function ComplexViewerPage() {
               onSelect={handleSelect}
               onPose={handlePose}
               uniprotId={complex.uniprot_id}
+              structureUrls={{
+                monomer: complex.monomer_structure_url,
+                dimer: complex.complex_structure_url,
+              }}
             />
           </section>
         </div>
