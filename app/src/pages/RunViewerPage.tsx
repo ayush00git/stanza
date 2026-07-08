@@ -65,7 +65,14 @@ function StructurePanel({
     )
   }
   return (
-    <MolstarViewer url={url} label={label} representation={representation} highlight={highlight} pose={pose} />
+    <MolstarViewer
+      url={url}
+      label={label}
+      representation={representation}
+      format="pdb"
+      highlight={highlight}
+      pose={pose}
+    />
   )
 }
 

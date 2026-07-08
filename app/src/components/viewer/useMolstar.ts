@@ -38,6 +38,12 @@ interface HTMLElementWithRoot extends HTMLDivElement {
 interface UseMolstarOptions {
   /** Remote .cif/.pdb URL. Loaded by Mol* directly — never downloaded to disk. */
   structureUrl?: string
+  /**
+   * Structure file format. When omitted it is inferred from the URL extension
+   * (.pdb → pdb, else mmcif). Pass explicitly for URLs without an extension —
+   * e.g. the runs endpoints serve PDB from /runs/:id/structure/:track.
+   */
+  format?: 'pdb' | 'mmcif'
   representation?: string
   label?: string
   /**
@@ -63,6 +69,7 @@ interface UseMolstarOptions {
  */
 export function useMolstar({
   structureUrl,
+  format,
   representation = 'cartoon',
   label = '',
   highlight,
@@ -231,8 +238,11 @@ export function useMolstar({
         { state: { isGhost: true } },
       )
 
-      const format = url.toLowerCase().endsWith('.pdb') ? 'pdb' : 'mmcif'
-      const trajectory = await plugin.builders.structure.parseTrajectory(data, format)
+      // Explicit format wins; otherwise infer from the extension (URLs without
+      // one — e.g. the runs structure endpoints — must pass it, or a PDB gets
+      // mis-parsed as mmCIF and renders as nothing).
+      const fmt = format ?? (url.toLowerCase().endsWith('.pdb') ? 'pdb' : 'mmcif')
+      const trajectory = await plugin.builders.structure.parseTrajectory(data, fmt)
       await plugin.builders.structure.hierarchy.applyPreset(trajectory, 'default', {
         representationPreset: 'auto',
       })

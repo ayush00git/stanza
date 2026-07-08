@@ -7,6 +7,8 @@ interface MolstarViewerProps {
   label: string
   plddt?: number
   representation: string
+  /** Structure format; inferred from the URL extension when omitted. */
+  format?: 'pdb' | 'mmcif'
   /** Residues of the selected pocket to spotlight in this viewer. */
   highlight?: HighlightResidue[]
   /** Raw PDB text of a docked ligand pose to overlay on the structure. */
@@ -22,11 +24,13 @@ export default function MolstarViewer({
   label,
   plddt,
   representation,
+  format,
   highlight,
   pose,
 }: MolstarViewerProps) {
   const { containerRef, isLoading, error } = useMolstar({
     structureUrl: url,
+    format,
     representation,
     label,
     highlight,
