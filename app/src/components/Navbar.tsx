@@ -1,3 +1,5 @@
+import { Link } from 'react-router-dom'
+
 const links = [
   { label: 'Search', href: '#search' },
   { label: 'Pipeline', href: '#pipeline' },
@@ -27,6 +29,11 @@ export default function Navbar() {
               </a>
             </li>
           ))}
+          <li>
+            <Link to="/runs" className="text-sm text-muted transition-colors hover:text-ink">
+              Resistance
+            </Link>
+          </li>
         </ul>
 
         <a
