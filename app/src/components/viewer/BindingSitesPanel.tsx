@@ -1,5 +1,6 @@
 import type { BindingSiteResult, Pocket } from '../../lib/api'
 import { plddtBand } from '../../lib/plddt'
+import DockingPanel from './DockingPanel'
 
 type Status = 'loading' | 'done' | 'error'
 
@@ -41,11 +42,13 @@ function PocketRow({
   rank,
   active,
   onSelect,
+  uniprotId,
 }: {
   pocket: Pocket
   rank: number
   active: boolean
   onSelect: (p: Pocket) => void
+  uniprotId?: string
 }) {
   const score = Math.max(0, Math.min(1, pocket.druggability_score))
   const residues = pocket.residue_indices?.length ?? 0
@@ -134,6 +137,17 @@ function PocketRow({
             <Stat label="Chains" value={pocket.chains.join(' / ')} />
           )}
         </div>
+
+        {/* Fragment docking is rendered inline for the selected pocket. Stop
+            click bubbling so button/input interactions don't re-toggle the row. */}
+        {active && (
+          <div
+            className="mt-4 border-t border-hairline pt-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <DockingPanel pocket={pocket} uniprotId={uniprotId} compact />
+          </div>
+        )}
       </div>
     </li>
   )
@@ -149,11 +163,13 @@ function PocketColumn({
   pockets,
   selectedKeys,
   onSelect,
+  uniprotId,
 }: {
   title: string
   pockets: Pocket[]
   selectedKeys: Set<string>
   onSelect: (p: Pocket) => void
+  uniprotId?: string
 }) {
   const sorted = byDruggability(pockets)
   return (
@@ -177,6 +193,7 @@ function PocketColumn({
               rank={i}
               active={selectedKeys.has(pocketKey(p))}
               onSelect={onSelect}
+              uniprotId={uniprotId}
             />
           ))}
         </ul>
@@ -196,12 +213,14 @@ export default function BindingSitesPanel({
   error,
   selectedKeys,
   onSelect,
+  uniprotId,
 }: {
   status: Status
   result: BindingSiteResult | null
   error: string | null
   selectedKeys: Set<string>
   onSelect: (p: Pocket) => void
+  uniprotId?: string
 }) {
   return (
     <section className="mx-auto w-full max-w-5xl px-6 py-8">
@@ -250,12 +269,14 @@ export default function BindingSitesPanel({
                 pockets={result.pockets}
                 selectedKeys={selectedKeys}
                 onSelect={onSelect}
+                uniprotId={uniprotId}
               />
               <PocketColumn
                 title="Monomer"
                 pockets={result.monomer_pockets}
                 selectedKeys={selectedKeys}
                 onSelect={onSelect}
+                uniprotId={uniprotId}
               />
             </div>
           )}
