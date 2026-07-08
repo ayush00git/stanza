@@ -83,8 +83,10 @@ func PrepareLigand(pdbPath, outDir string) (string, error) {
     return outPath, nil
 }
 
-// RunVinaDock docks ligand into receptor using Vina and returns best pose
-func RunVinaDock(receptorPDBQT, ligandPDBQT string, pocket models.Pocket, outDir string) (DockResult, error) {
+// RunVinaDock docks ligand into receptor using Vina and returns best pose.
+// exhaustiveness/cpu are tunable: high exhaustiveness for a one-off dock, lower
+// for screening many molecules in a loop.
+func RunVinaDock(receptorPDBQT, ligandPDBQT string, pocket models.Pocket, exhaustiveness, cpu int, outDir string) (DockResult, error) {
     outPDBQT := filepath.Join(outDir, "docked.pdbqt")
     outPDB := filepath.Join(outDir, "docked.pdb")
 
@@ -99,8 +101,8 @@ func RunVinaDock(receptorPDBQT, ligandPDBQT string, pocket models.Pocket, outDir
         "--size_x", fmt.Sprintf("%.3f", size),
         "--size_y", fmt.Sprintf("%.3f", size),
         "--size_z", fmt.Sprintf("%.3f", size),
-        "--exhaustiveness", "16",
-        "--cpu", "4",
+        "--exhaustiveness", fmt.Sprint(exhaustiveness),
+        "--cpu", fmt.Sprint(cpu),
         "--out", outPDBQT,
     )
     var stdout, stderr bytes.Buffer

@@ -124,7 +124,7 @@ func (s *JobStore) runJob(ctx context.Context, jobID string, pocket models.Pocke
 	log.Printf("[dock:%s] Running Vina: receptor=%s ligand=%s center=%.1f,%.1f,%.1f",
 		jobID[:8], receptorPDBQT, ligandPDBQT,
 		pocket.Center[0], pocket.Center[1], pocket.Center[2])
-	res, err := RunVinaDock(receptorPDBQT, ligandPDBQT, pocket, tmpDir)
+	res, err := RunVinaDock(receptorPDBQT, ligandPDBQT, pocket, 16, 4, tmpDir)
 	if err != nil {
 		s.updateError(jobID, fmt.Errorf("docking run failed: %w", err))
 		return

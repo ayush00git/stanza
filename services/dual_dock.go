@@ -46,11 +46,11 @@ func DockLigandDualTrack(ctx context.Context, run *models.Run, smiles string) (*
 		return nil, fmt.Errorf("dock: ligand prep: %w", err)
 	}
 
-	wtScore, wtPose, err := dockTrack(RunStructurePath(run.ID, "wt"), ligPDBQT, pocket, filepath.Join(tmp, "wt"))
+	wtScore, wtPose, err := dockTrack(run.ID, "wt", ligPDBQT, pocket, filepath.Join(tmp, "wt"))
 	if err != nil {
 		return nil, fmt.Errorf("dock: WT track: %w", err)
 	}
-	mutScore, mutPose, err := dockTrack(RunStructurePath(run.ID, "mutant"), ligPDBQT, pocket, filepath.Join(tmp, "mutant"))
+	mutScore, mutPose, err := dockTrack(run.ID, "mutant", ligPDBQT, pocket, filepath.Join(tmp, "mutant"))
 	if err != nil {
 		return nil, fmt.Errorf("dock: mutant track: %w", err)
 	}
@@ -66,21 +66,62 @@ func DockLigandDualTrack(ctx context.Context, run *models.Run, smiles string) (*
 	}, nil
 }
 
-// dockTrack prepares a receptor from a local structure file and docks the already
-// prepared ligand into it at the given pocket box, returning the Vina affinity and
-// the docked-pose PDB.
-func dockTrack(receptorPDB, ligandPDBQT string, pocket models.Pocket, outDir string) (float64, string, error) {
+// Screening docking parameters — lower exhaustiveness than a one-off dock, since
+// the generation loop scores many molecules and only needs reliable relative
+// ranking, not final-quality poses.
+const (
+	screenExhaustiveness = 8
+	screenCPU            = 2
+)
+
+// dockTrack docks the prepared ligand into a run's structure for one track, reusing
+// the run's cached receptor PDBQT (prepared once via ensureReceptorPDBQT), and
+// returns the Vina affinity and the docked-pose PDB.
+func dockTrack(runID, track, ligandPDBQT string, pocket models.Pocket, outDir string) (float64, string, error) {
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return 0, "", err
 	}
-	receptorPDBQT, err := PrepareReceptor(receptorPDB, outDir)
+	receptorPDBQT, err := ensureReceptorPDBQT(runID, track)
 	if err != nil {
 		return 0, "", fmt.Errorf("receptor prep: %w", err)
 	}
-	res, err := RunVinaDock(receptorPDBQT, ligandPDBQT, pocket, outDir)
+	res, err := RunVinaDock(receptorPDBQT, ligandPDBQT, pocket, screenExhaustiveness, screenCPU, outDir)
 	if err != nil {
 		return 0, "", err
 	}
 	pose, _ := os.ReadFile(res.DockedPDB)
 	return res.BindingAffinity, string(pose), nil
+}
+
+// ensureReceptorPDBQT prepares a run's receptor PDBQT for a track once and caches it
+// under the run's structure directory, so repeated docks against the same run don't
+// re-run the (identical) receptor prep. Concurrency-safe: the final file is written
+// via a temp file + atomic rename.
+func ensureReceptorPDBQT(runID, track string) (string, error) {
+	dst := filepath.Join(RunStructureDir(runID), track+"_receptor.pdbqt")
+	if info, err := os.Stat(dst); err == nil && info.Size() > 0 {
+		return dst, nil
+	}
+	// PrepareReceptor writes "receptor.pdbqt" into a scratch dir; move it into place.
+	scratch, err := os.MkdirTemp("", "recprep-")
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(scratch)
+	prepared, err := PrepareReceptor(RunStructurePath(runID, track), scratch)
+	if err != nil {
+		return "", err
+	}
+	data, err := os.ReadFile(prepared)
+	if err != nil {
+		return "", err
+	}
+	tmp := dst + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return "", err
+	}
+	if err := os.Rename(tmp, dst); err != nil { // atomic on the same filesystem
+		return "", err
+	}
+	return dst, nil
 }
