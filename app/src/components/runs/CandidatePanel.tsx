@@ -36,9 +36,9 @@ function signedSel(x: number): string {
 
 function Metric({ label, value }: { label: string; value: string }) {
   return (
-    <span className="inline-flex items-baseline gap-1 font-mono text-[11px] text-muted">
+    <span className="inline-flex items-baseline gap-1 text-xs text-muted">
       <span className="tabular-nums text-ink">{value}</span>
-      <span className="text-[9px] uppercase tracking-[0.1em]">{label}</span>
+      <span>{label}</span>
     </span>
   )
 }
@@ -46,7 +46,7 @@ function Metric({ label, value }: { label: string; value: string }) {
 function DockBadge({ state }: { state: CandidateDockState }) {
   if (state.phase === 'docking') {
     return (
-      <span className="inline-flex items-center gap-1.5 rounded-full border border-hairline px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.1em] text-muted">
+      <span className="inline-flex items-center gap-1.5 rounded-full border border-hairline px-2 py-0.5 text-xs text-muted">
         <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current" />
         Docking
       </span>
@@ -54,14 +54,13 @@ function DockBadge({ state }: { state: CandidateDockState }) {
   }
   if (state.phase === 'error') {
     return (
-      <span className="rounded-full bg-conf-verylow/15 px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.1em] text-ink">
-        Failed
-      </span>
+      <span className="rounded-full bg-conf-verylow/15 px-2 py-0.5 text-xs text-ink">Failed</span>
     )
   }
   return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-accent-soft px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.1em] text-accent">
-      sel <span className="tabular-nums">{state.selectivity != null ? signedSel(state.selectivity) : '—'}</span>
+    <span className="inline-flex items-center gap-1 rounded-full bg-accent-soft px-2 py-0.5 text-xs text-accent">
+      selectivity{' '}
+      <span className="tabular-nums">{state.selectivity != null ? signedSel(state.selectivity) : '—'}</span>
     </span>
   )
 }
@@ -89,9 +88,7 @@ export default function CandidatePanel({
     <div>
       {/* Generate control. */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <span className="font-mono text-[11px] uppercase tracking-[0.15em] text-muted">
-          Candidate molecules · Claude
-        </span>
+        <span className="text-sm font-medium text-ink">Candidate molecules</span>
         <div className="flex items-center gap-2">
           <div className="flex rounded-md border border-hairline bg-paper-deep p-0.5">
             {GEN_COUNTS.map((c) => (
@@ -100,7 +97,7 @@ export default function CandidatePanel({
                 type="button"
                 onClick={() => setN(c)}
                 disabled={generating}
-                className={`rounded px-2 py-1 font-mono text-[10px] tabular-nums transition-colors disabled:opacity-50 ${
+                className={`rounded px-2.5 py-1 text-xs tabular-nums transition-colors disabled:opacity-50 ${
                   n === c ? 'bg-paper text-ink shadow-[0_1px_2px_rgba(18,22,28,0.12)]' : 'text-muted hover:text-ink'
                 }`}
               >
@@ -112,20 +109,18 @@ export default function CandidatePanel({
             type="button"
             onClick={() => onGenerate(n)}
             disabled={generating || !canGenerate}
-            className="rounded-md border border-ink bg-ink px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.1em] text-paper transition-colors hover:bg-transparent hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-md border border-ink bg-ink px-3.5 py-1.5 text-xs font-medium text-paper transition-colors hover:bg-transparent hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
           >
             {generating ? 'Generating…' : 'Generate'}
           </button>
         </div>
       </div>
 
-      {generateError && (
-        <p className="mt-3 font-mono text-[11px] text-conf-verylow">{generateError}</p>
-      )}
+      {generateError && <p className="mt-3 text-sm text-conf-verylow">{generateError}</p>}
 
       {candidates.length === 0 ? (
         <div className="mt-4 rounded-lg border border-dashed border-hairline bg-paper-deep/40 px-6 py-12 text-center">
-          <p className="font-mono text-xs uppercase tracking-[0.12em] text-muted">
+          <p className="text-sm text-muted">
             {generating
               ? 'Claude is proposing molecules…'
               : canGenerate
@@ -144,7 +139,7 @@ export default function CandidatePanel({
                 className="flex flex-col gap-3 border-b border-hairline px-3 py-3 last:border-b-0 sm:flex-row sm:items-start sm:justify-between"
               >
                 <div className="min-w-0 flex-1">
-                  <p className="truncate font-mono text-[11px] text-ink" title={c.smiles}>
+                  <p className="truncate font-mono text-xs text-ink" title={c.smiles}>
                     {truncateSmiles(c.smiles)}
                   </p>
                   <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1">
@@ -152,14 +147,10 @@ export default function CandidatePanel({
                     <Metric label="MW" value={c.mol_weight.toFixed(0)} />
                     <Metric label="logP" value={c.logp.toFixed(2)} />
                     {c.sa_score != null && <Metric label="SA" value={c.sa_score.toFixed(1)} />}
-                    {c.ro5_pass && (
-                      <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-accent">
-                        Ro5 ✓
-                      </span>
-                    )}
+                    {c.ro5_pass && <span className="text-xs text-accent">Ro5 ✓</span>}
                   </div>
                   {state?.phase === 'error' && state.error && (
-                    <p className="mt-1.5 font-mono text-[11px] text-conf-verylow">{state.error}</p>
+                    <p className="mt-1.5 text-xs text-conf-verylow">{state.error}</p>
                   )}
                 </div>
 
@@ -169,7 +160,7 @@ export default function CandidatePanel({
                     type="button"
                     onClick={() => onDock(c.smiles)}
                     disabled={busy}
-                    className="w-full max-w-[7rem] rounded-md border border-hairline bg-paper-deep px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.1em] text-ink transition-colors hover:border-[var(--color-accent)] hover:text-accent disabled:cursor-not-allowed disabled:opacity-50"
+                    className="w-full max-w-[7rem] rounded-md border border-hairline bg-paper-deep px-3 py-1.5 text-xs font-medium text-ink transition-colors hover:border-[var(--color-accent)] hover:text-accent disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {state?.phase === 'done' || state?.phase === 'error' ? 'Re-dock' : 'Dock'}
                   </button>

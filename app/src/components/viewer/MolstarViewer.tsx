@@ -40,9 +40,9 @@ export default function MolstarViewer({
   return (
     <div className="flex flex-1 flex-col">
       <div className="flex items-baseline justify-between border-b border-hairline px-3 py-2">
-        <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-ink">{label}</span>
+        <span className="text-sm font-medium text-ink">{label}</span>
         {plddt !== undefined && plddt > 0 && (
-          <span className="font-mono text-[11px] text-muted">pLDDT {plddt.toFixed(1)}</span>
+          <span className="text-xs tabular-nums text-muted">pLDDT {plddt.toFixed(1)}</span>
         )}
       </div>
 

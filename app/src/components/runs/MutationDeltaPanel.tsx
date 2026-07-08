@@ -19,8 +19,8 @@ function signed(x: number, digits = 1): string {
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex flex-col gap-0.5">
-      <span className="font-mono text-[9px] uppercase tracking-[0.14em] text-muted">{label}</span>
-      <span className="font-mono text-sm tabular-nums text-ink">{value}</span>
+      <span className="text-xs text-muted">{label}</span>
+      <span className="text-sm tabular-nums text-ink">{value}</span>
     </div>
   )
 }
@@ -33,9 +33,7 @@ function Chip({ text, tone = 'plain' }: { text: string; tone?: 'plain' | 'gain' 
       : tone === 'loss'
         ? 'border-hairline bg-paper text-muted line-through'
         : 'border-hairline bg-paper text-ink'
-  return (
-    <span className={`rounded-full border px-2 py-0.5 font-mono text-[10px] ${cls}`}>{text}</span>
-  )
+  return <span className={`rounded-full border px-2 py-0.5 text-xs ${cls}`}>{text}</span>
 }
 
 /**
@@ -46,14 +44,10 @@ function Chip({ text, tone = 'plain' }: { text: string; tone?: 'plain' | 'gain' 
  */
 export default function MutationDeltaPanel({ status, context, error, mutation }: Props) {
   if (status === 'loading') {
-    return (
-      <p className="animate-pulse font-mono text-xs uppercase tracking-[0.15em] text-muted">
-        Analysing the wild-type and mutant pockets…
-      </p>
-    )
+    return <p className="animate-pulse text-sm text-muted">Analysing the wild-type and mutant pockets…</p>
   }
   if (status === 'error') {
-    return <p className="font-mono text-sm text-conf-verylow">{error}</p>
+    return <p className="text-sm text-conf-verylow">{error}</p>
   }
   if (!context) {
     return (
@@ -71,14 +65,12 @@ export default function MutationDeltaPanel({ status, context, error, mutation }:
     <div className="grid gap-6 lg:grid-cols-2">
       {/* Mutant pocket — the site to bind. */}
       <div className="rounded-lg border border-hairline bg-paper-deep/40 p-4">
-        <div className="mb-3 font-mono text-[11px] uppercase tracking-[0.12em] text-ink">
-          Mutant pocket
-        </div>
+        <div className="mb-3 text-sm font-medium text-ink">Mutant pocket</div>
         <div className="mb-3 flex flex-wrap gap-1.5">
           {mp.key_residues.length > 0 ? (
             mp.key_residues.map((r) => <Chip key={r} text={r} />)
           ) : (
-            <span className="text-xs text-muted">no key residues resolved</span>
+            <span className="text-sm text-muted">no key residues resolved</span>
           )}
         </div>
         <div className="flex flex-wrap gap-x-8 gap-y-2">
@@ -90,9 +82,7 @@ export default function MutationDeltaPanel({ status, context, error, mutation }:
 
       {/* Delta — what the mutation changed. */}
       <div className="rounded-lg border border-hairline bg-paper-deep/40 p-4">
-        <div className="mb-3 font-mono text-[11px] uppercase tracking-[0.12em] text-ink">
-          What changed (WT → mutant)
-        </div>
+        <div className="mb-3 text-sm font-medium text-ink">What changed (WT → mutant)</div>
 
         {d.changed.length > 0 && (
           <div className="mb-3 flex flex-wrap gap-1.5">
@@ -115,7 +105,7 @@ export default function MutationDeltaPanel({ status, context, error, mutation }:
           </div>
         )}
 
-        {d.effect && <p className="text-xs leading-relaxed text-muted">{d.effect}</p>}
+        {d.effect && <p className="text-sm leading-relaxed text-muted">{d.effect}</p>}
       </div>
     </div>
   )

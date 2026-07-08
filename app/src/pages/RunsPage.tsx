@@ -79,10 +79,7 @@ export default function RunsPage() {
           <Link to="/" className="font-display text-xl font-medium tracking-[-0.02em] text-ink">
             Stanza<span className="text-accent">.</span>
           </Link>
-          <Link
-            to="/"
-            className="font-mono text-[11px] uppercase tracking-[0.1em] text-muted transition-colors hover:text-ink"
-          >
+          <Link to="/" className="text-sm text-muted transition-colors hover:text-ink">
             ← Home
           </Link>
         </div>
@@ -104,45 +101,39 @@ export default function RunsPage() {
           >
             <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
               <label className="flex min-w-0 flex-1 flex-col gap-1.5">
-                <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted">
-                  UniProt ID
-                </span>
+                <span className="text-xs text-muted">UniProt ID</span>
                 <input
                   value={uniprot}
                   onChange={(e) => setUniprot(e.target.value)}
                   placeholder="P01116"
                   spellCheck={false}
-                  className="rounded-md border border-hairline bg-paper px-3 py-2 font-mono text-sm text-ink outline-none transition-colors focus:border-[var(--color-accent)]"
+                  className="rounded-md border border-hairline bg-paper px-3 py-2 text-sm text-ink outline-none transition-colors focus:border-[var(--color-accent)]"
                 />
               </label>
               <label className="flex flex-col gap-1.5 sm:w-40">
-                <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted">
-                  Mutation
-                </span>
+                <span className="text-xs text-muted">Mutation</span>
                 <input
                   value={mutation}
                   onChange={(e) => setMutation(e.target.value)}
                   placeholder="G12C"
                   spellCheck={false}
-                  className="rounded-md border border-hairline bg-paper px-3 py-2 font-mono text-sm text-ink outline-none transition-colors focus:border-[var(--color-accent)]"
+                  className="rounded-md border border-hairline bg-paper px-3 py-2 text-sm text-ink outline-none transition-colors focus:border-[var(--color-accent)]"
                 />
               </label>
               <button
                 type="submit"
                 disabled={creating || !uniprot.trim() || !mutation.trim()}
-                className="rounded-md border border-ink bg-ink px-4 py-2 font-mono text-[11px] uppercase tracking-[0.1em] text-paper transition-colors hover:bg-transparent hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
+                className="rounded-md border border-ink bg-ink px-4 py-2 text-sm font-medium text-paper transition-colors hover:bg-transparent hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {creating ? 'Building…' : 'Start run'}
               </button>
             </div>
 
-            {createError && (
-              <p className="mt-3 font-mono text-[11px] text-conf-verylow">{createError}</p>
-            )}
+            {createError && <p className="mt-3 text-sm text-conf-verylow">{createError}</p>}
 
             {/* Example prefills */}
             <div className="mt-4 flex flex-wrap items-center gap-2">
-              <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted">Try</span>
+              <span className="text-xs text-muted">Try</span>
               {EXAMPLES.map((ex) => (
                 <button
                   key={ex.label}
@@ -151,7 +142,7 @@ export default function RunsPage() {
                     setUniprot(ex.uniprot)
                     setMutation(ex.mutation)
                   }}
-                  className="rounded-full border border-hairline bg-paper px-2.5 py-0.5 font-mono text-[10px] text-ink transition-colors hover:border-[var(--color-accent)] hover:text-accent"
+                  className="rounded-full border border-hairline bg-paper px-2.5 py-0.5 text-xs text-ink transition-colors hover:border-[var(--color-accent)] hover:text-accent"
                 >
                   {ex.label}
                 </button>
@@ -159,7 +150,7 @@ export default function RunsPage() {
             </div>
           </form>
           {creating && (
-            <p className="mt-2 font-mono text-[11px] text-muted">
+            <p className="mt-2 text-sm text-muted">
               Acquiring the structure and building the mutant — this can take a moment.
             </p>
           )}
@@ -170,11 +161,9 @@ export default function RunsPage() {
           <h2 className="mb-4 font-display text-base font-medium text-ink">Recent runs</h2>
 
           {status === 'error' ? (
-            <p className="font-mono text-sm text-conf-verylow">Could not load runs.</p>
+            <p className="text-sm text-conf-verylow">Could not load runs.</p>
           ) : status === 'loading' ? (
-            <p className="animate-pulse font-mono text-xs uppercase tracking-[0.15em] text-muted">
-              Loading runs…
-            </p>
+            <p className="animate-pulse text-sm text-muted">Loading runs…</p>
           ) : runs.length === 0 ? (
             <div className="rounded-lg border border-dashed border-hairline bg-paper-deep/40 px-6 py-10 text-center">
               <p className="text-sm text-muted">No runs yet — start one above.</p>
@@ -189,17 +178,17 @@ export default function RunsPage() {
                   >
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
-                        <span className="font-mono text-sm text-ink">{run.uniprot_id}</span>
-                        <span className="rounded-full border border-accent/40 bg-accent-soft px-2 py-0.5 font-mono text-[10px] text-accent">
+                        <span className="text-sm font-medium text-ink">{run.uniprot_id}</span>
+                        <span className="rounded-full border border-accent/40 bg-accent-soft px-2 py-0.5 text-xs font-medium text-accent">
                           {run.mutation.raw}
                         </span>
                       </div>
-                      <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-muted">
-                        {run.status}
+                      <span className="text-xs text-muted">
+                        {run.status.replace(/_/g, ' ')}
                         {run.created_at && ` · ${shortDate(run.created_at)}`}
                       </span>
                     </div>
-                    <span className="flex-none font-mono text-[11px] text-muted">→</span>
+                    <span className="flex-none text-sm text-muted">→</span>
                   </Link>
                 </li>
               ))}

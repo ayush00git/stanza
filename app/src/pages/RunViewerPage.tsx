@@ -32,8 +32,8 @@ type LoadStatus = 'loading' | 'done' | 'error'
 function MetaItem({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex flex-col gap-0.5">
-      <span className="font-mono text-[9px] uppercase tracking-[0.14em] text-muted">{label}</span>
-      <span className="text-[13px] text-ink">{children}</span>
+      <span className="text-xs text-muted">{label}</span>
+      <span className="text-sm text-ink">{children}</span>
     </div>
   )
 }
@@ -56,10 +56,10 @@ function StructurePanel({
     return (
       <div className="flex min-h-0 flex-1 flex-col">
         <div className="flex items-baseline justify-between border-b border-hairline px-3 py-2">
-          <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-ink">{label}</span>
+          <span className="text-sm font-medium text-ink">{label}</span>
         </div>
         <div className="flex min-h-0 flex-1 items-center justify-center bg-paper-deep">
-          <span className="font-mono text-xs uppercase tracking-[0.12em] text-muted">Not available</span>
+          <span className="text-sm text-muted">Not available</span>
         </div>
       </div>
     )
@@ -81,13 +81,13 @@ function PoseCaption({ smiles, selectivity, onClear }: { smiles: string; selecti
   const sel = selectivity > 0 ? `+${selectivity.toFixed(2)}` : selectivity.toFixed(2).replace('-', '−')
   return (
     <div className="flex items-center justify-between gap-3 border-t border-hairline bg-accent-soft px-3 py-1.5">
-      <span className="min-w-0 truncate font-mono text-[10px] uppercase tracking-[0.1em] text-accent" title={smiles}>
+      <span className="min-w-0 truncate text-xs text-accent" title={smiles}>
         Docked pose · selectivity {sel}
       </span>
       <button
         type="button"
         onClick={onClear}
-        className="flex-none font-mono text-[10px] uppercase tracking-[0.1em] text-muted transition-colors hover:text-ink"
+        className="flex-none text-xs text-muted transition-colors hover:text-ink"
       >
         Clear
       </button>
@@ -278,7 +278,7 @@ export default function RunViewerPage() {
             <div className="flex min-w-0 items-center gap-4">
               <Link
                 to="/runs"
-                className="font-mono text-[11px] uppercase tracking-[0.1em] text-muted transition-colors hover:text-ink"
+                className="text-sm text-muted transition-colors hover:text-ink"
               >
                 ← Runs
               </Link>
@@ -286,7 +286,7 @@ export default function RunViewerPage() {
                 <h1 className="flex items-center gap-2 truncate font-display text-xl font-medium text-ink">
                   {run?.uniprot_id || id}
                   {run?.mutation && (
-                    <span className="flex-none rounded-full border border-accent/40 bg-accent-soft px-2 py-0.5 font-mono text-[11px] text-accent">
+                    <span className="flex-none rounded-full border border-accent/40 bg-accent-soft px-2 py-0.5 text-xs font-medium text-accent">
                       {run.mutation.raw}
                     </span>
                   )}
@@ -295,9 +295,7 @@ export default function RunViewerPage() {
               </div>
             </div>
             {run?.status && (
-              <span className="flex-none font-mono text-[10px] uppercase tracking-[0.12em] text-muted">
-                {run.status}
-              </span>
+              <span className="flex-none text-xs text-muted">{run.status.replace(/_/g, ' ')}</span>
             )}
           </div>
 
@@ -312,11 +310,11 @@ export default function RunViewerPage() {
 
       {runError ? (
         <div className="flex flex-1 items-center justify-center p-6 text-center">
-          <p className="font-mono text-sm text-conf-verylow">{runError}</p>
+          <p className="text-sm text-conf-verylow">{runError}</p>
         </div>
       ) : !run ? (
         <div className="flex flex-1 items-center justify-center">
-          <span className="animate-pulse font-mono text-xs uppercase tracking-[0.15em] text-muted">Loading…</span>
+          <span className="animate-pulse text-sm text-muted">Loading…</span>
         </div>
       ) : (
         <div className="mx-auto flex w-full max-w-6xl flex-col gap-10 px-6 py-8">
@@ -330,7 +328,7 @@ export default function RunViewerPage() {
                     key={opt.value}
                     type="button"
                     onClick={() => setRepresentation(opt.value)}
-                    className={`rounded px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.1em] transition-colors ${
+                    className={`rounded px-2.5 py-1 text-xs transition-colors ${
                       representation === opt.value
                         ? 'bg-paper text-ink shadow-[0_1px_2px_rgba(18,22,28,0.12)]'
                         : 'text-muted hover:text-ink'
@@ -344,9 +342,7 @@ export default function RunViewerPage() {
 
             {!hasStructures ? (
               <div className="mt-4 rounded-lg border border-dashed border-hairline bg-paper-deep/40 px-6 py-12 text-center">
-                <p className="font-mono text-xs uppercase tracking-[0.12em] text-muted">
-                  No mutant structure was built for this run
-                </p>
+                <p className="text-sm text-muted">No mutant structure was built for this run</p>
               </div>
             ) : (
               <div className="mt-4 flex flex-col overflow-hidden rounded-lg border border-hairline bg-paper-deep">

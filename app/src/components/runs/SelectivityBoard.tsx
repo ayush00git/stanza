@@ -40,7 +40,7 @@ export default function SelectivityBoard({ ranking, status, error, activeSmiles,
     <section className="flex flex-col">
       <div className="mb-4 flex flex-col gap-1 border-t border-hairline pt-6">
         <h2 className="font-display text-base font-medium text-ink">Selectivity ranking</h2>
-        <p className="text-xs text-muted">
+        <p className="text-sm text-muted">
           {rows.length === 0
             ? 'Dock candidates to rank them by selectivity fitness.'
             : `${rows.length} molecule${rows.length !== 1 ? 's' : ''} · click a row to view its poses.`}
@@ -48,7 +48,7 @@ export default function SelectivityBoard({ ranking, status, error, activeSmiles,
       </div>
 
       {status === 'error' ? (
-        <p className="font-mono text-sm text-conf-verylow">{error ?? 'Ranking failed'}</p>
+        <p className="text-sm text-conf-verylow">{error ?? 'Ranking failed'}</p>
       ) : rows.length === 0 ? (
         <div className="rounded-md border border-dashed border-hairline bg-paper px-4 py-8 text-center">
           <p className="text-sm text-muted">
@@ -77,7 +77,7 @@ export default function SelectivityBoard({ ranking, status, error, activeSmiles,
                     }`}
                   >
                     <span
-                      className={`w-5 flex-none text-center font-mono text-sm tabular-nums ${
+                      className={`w-5 flex-none text-center text-sm tabular-nums ${
                         isActive ? 'text-accent' : 'text-muted'
                       }`}
                     >
@@ -85,10 +85,10 @@ export default function SelectivityBoard({ ranking, status, error, activeSmiles,
                     </span>
 
                     <div className="min-w-0 flex-1">
-                      <p className="truncate font-mono text-[11px] text-ink" title={m.smiles}>
+                      <p className="truncate font-mono text-xs text-ink" title={m.smiles}>
                         {truncateSmiles(m.smiles)}
                       </p>
-                      <div className="mt-0.5 flex flex-wrap items-center gap-x-2.5 gap-y-0.5 font-mono text-[9px] text-muted">
+                      <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted">
                         <span className="tabular-nums">wt {m.scores.wt_score.toFixed(1)}</span>
                         <span className="tabular-nums">mut {m.scores.mutant_score.toFixed(1)}</span>
                         {m.scores.qed != null && (
@@ -98,14 +98,10 @@ export default function SelectivityBoard({ ranking, status, error, activeSmiles,
                     </div>
 
                     <div className="flex flex-none flex-col items-end">
-                      <span
-                        className={`font-mono text-sm tabular-nums ${selTone(m.scores.selectivity)}`}
-                      >
+                      <span className={`text-sm tabular-nums ${selTone(m.scores.selectivity)}`}>
                         {signedSel(m.scores.selectivity)}
                       </span>
-                      <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-muted">
-                        selectivity
-                      </span>
+                      <span className="text-xs text-muted">selectivity</span>
                     </div>
                   </div>
                 </li>
@@ -113,16 +109,16 @@ export default function SelectivityBoard({ ranking, status, error, activeSmiles,
             })}
           </ul>
 
-          <div className="flex items-center justify-between border-t border-hairline px-3 py-2">
-            <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-muted">
-              {ranking?.normalization ?? 'zscore'} · w{' '}
+          <div className="flex items-center justify-between border-t border-hairline px-3 py-2 text-xs text-muted">
+            <span>
+              {ranking?.normalization ?? 'zscore'} · weights{' '}
               {ranking
                 ? `${ranking.weights.selectivity}/${ranking.weights.potency}/${ranking.weights.drug_likeness}`
                 : '—'}
             </span>
             {best != null && (
-              <span className="font-mono text-[9px] text-muted">
-                Best sel <span className={selTone(best)}>{signedSel(best)}</span>
+              <span>
+                Best <span className={selTone(best)}>{signedSel(best)}</span>
               </span>
             )}
           </div>
