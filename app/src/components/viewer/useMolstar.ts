@@ -322,7 +322,11 @@ export function useMolstar({
         { state: { isGhost: false } },
       )
       const trajectory = await plugin.builders.structure.parseTrajectory(data, 'pdb')
-      const model = await plugin.builders.structure.createModel(trajectory)
+      // Vina writes up to 9 ranked binding modes into the pose PDB; render only
+      // the best one (model index 0 = mode 1, the lowest binding energy).
+      const model = await plugin.builders.structure.createModel(trajectory, {
+        modelIndex: 0,
+      })
       const struct = await plugin.builders.structure.createStructure(model, {
         name: 'model',
         params: {},
