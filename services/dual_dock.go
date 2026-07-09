@@ -50,24 +50,85 @@ func DockLigandDualTrack(ctx context.Context, run *models.Run, smiles string) (*
 		return nil, fmt.Errorf("dock: ligand prep: %w", err)
 	}
 
-	wtScore, wtPose, err := dockTrack(run.ID, "wt", ligPDBQT, pocket, filepath.Join(tmp, "wt"))
+	wtScore, wtPose, _, err := dockTrack(run.ID, "wt", ligPDBQT, pocket, filepath.Join(tmp, "wt"))
 	if err != nil {
 		return nil, fmt.Errorf("dock: WT track: %w", err)
 	}
-	mutScore, mutPose, err := dockTrack(run.ID, "mutant", ligPDBQT, pocket, filepath.Join(tmp, "mutant"))
+	mutDir := filepath.Join(tmp, "mutant")
+	mutScore, mutPose, mutPDBQT, err := dockTrack(run.ID, "mutant", ligPDBQT, pocket, mutDir)
 	if err != nil {
 		return nil, fmt.Errorf("dock: mutant track: %w", err)
 	}
 
-	_ = ctx // reserved for cancellation once the docking CLIs accept a context
-	return &models.LigandDock{
+	dock := &models.LigandDock{
 		SMILES:        smiles,
 		WTScore:       round2(wtScore),
 		MutantScore:   round2(mutScore),
-		Selectivity:   round2(wtScore - mutScore),
 		WTPosePDB:     wtPose,
 		MutantPosePDB: mutPose,
-	}, nil
+	}
+
+	// Covalent adjustment: when the mutated residue is a cysteine and the ligand
+	// carries a warhead that docks within reach of the thiol, credit the covalent
+	// bond on the mutant score. The WT track (no thiol) never earns this, so the
+	// credit is the WT/mutant selectivity that non-covalent Vina cannot see.
+	if isCovalentTarget(run.Mutagenesis.MutantResidue) {
+		if adj, cov := applyCovalent(ctx, run, smiles, mutScore, mutPDBQT, mutDir); cov != nil {
+			mutScore = adj
+			dock.MutantScore = round2(adj)
+			covDock := cov.CovalentDock
+			dock.Covalent = &covDock
+			if cov.posePDB != "" {
+				dock.MutantPosePDB = cov.posePDB
+			}
+		}
+	}
+
+	dock.Selectivity = round2(wtScore - mutScore)
+	return dock, nil
+}
+
+// applyCovalent runs the covalent assessment on the mutant docked pose and, when the
+// warhead reaches the thiol, returns the covalent-adjusted mutant score and the
+// CovalentDock record. Returns (mutScore, nil) when no covalent credit applies —
+// non-covalent molecule, warhead out of reach, or the helper failing (in which case
+// the dock degrades gracefully to non-covalent rather than erroring the run).
+func applyCovalent(ctx context.Context, run *models.Run, smiles string, mutScore float64, mutPDBQT, outDir string) (float64, *covalentResult) {
+	tetherOut := filepath.Join(outDir, "tether.pdb")
+	a, err := assessCovalent(ctx, smiles, mutPDBQT,
+		RunStructurePath(run.ID, "mutant"),
+		run.Mutagenesis.TargetChain, run.Mutagenesis.TargetResidueNum, tetherOut)
+	if err != nil || !a.HasWarhead || a.ReachDistance == nil {
+		return mutScore, nil
+	}
+	credit := covalentCredit(*a.ReachDistance, DefaultCovalentParams())
+	if credit <= 0 {
+		return mutScore, nil
+	}
+	adjusted := mutScore - credit
+	cov := &covalentResult{
+		CovalentDock: models.CovalentDock{
+			TargetResidue:    resToken(run.Mutagenesis.MutantResidue, run.Mutagenesis.TargetResidueNum),
+			WarheadType:      a.WarheadType,
+			ReachDistance:    round2(*a.ReachDistance),
+			Credit:           round2(credit),
+			NonCovalentScore: round2(mutScore),
+			BondDistance:     round2(a.BondDistance),
+		},
+	}
+	if a.TetherWritten {
+		if b, e := os.ReadFile(tetherOut); e == nil {
+			cov.posePDB = string(b)
+		}
+	}
+	return adjusted, cov
+}
+
+// covalentResult carries the persisted CovalentDock plus the tethered pose PDB,
+// which lives on LigandDock.MutantPosePDB rather than in CovalentDock.
+type covalentResult struct {
+	models.CovalentDock
+	posePDB string
 }
 
 // Screening docking parameters — lower exhaustiveness than a one-off dock, since
@@ -78,31 +139,39 @@ const (
 	screenCPU            = 2
 )
 
-// screenVinaOptions are shared by both tracks: identical box and identical seed, so
-// a WT/mutant score difference can only come from the receptor.
+// screenNumModes is how many binding modes both tracks report. The extra modes
+// don't change the best (mode-1) score used for selectivity; they give the covalent
+// reach scan lower-ranked poses to inspect for a warhead orientation that reaches
+// the thiol.
+const screenNumModes = 20
+
+// screenVinaOptions are shared by both tracks: identical box, seed and mode count,
+// so a WT/mutant score difference can only come from the receptor.
 var screenVinaOptions = VinaOptions{
 	Exhaustiveness: screenExhaustiveness,
 	CPU:            screenCPU,
 	Seed:           DefaultDockSeed,
+	NumModes:       screenNumModes,
 }
 
 // dockTrack docks the prepared ligand into a run's structure for one track, reusing
 // the run's cached receptor PDBQT (prepared once via ensureReceptorPDBQT), and
-// returns the Vina affinity and the docked-pose PDB.
-func dockTrack(runID, track, ligandPDBQT string, pocket models.Pocket, outDir string) (float64, string, error) {
+// returns the Vina affinity, the docked-pose PDB, and the multi-mode docked PDBQT
+// path (for covalent reach assessment; valid until the caller cleans outDir).
+func dockTrack(runID, track, ligandPDBQT string, pocket models.Pocket, outDir string) (float64, string, string, error) {
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
-		return 0, "", err
+		return 0, "", "", err
 	}
 	receptorPDBQT, err := ensureReceptorPDBQT(runID, track)
 	if err != nil {
-		return 0, "", fmt.Errorf("receptor prep: %w", err)
+		return 0, "", "", fmt.Errorf("receptor prep: %w", err)
 	}
 	res, err := RunVinaDock(receptorPDBQT, ligandPDBQT, pocket, screenVinaOptions, outDir)
 	if err != nil {
-		return 0, "", err
+		return 0, "", "", err
 	}
 	pose, _ := os.ReadFile(res.DockedPDB)
-	return res.BindingAffinity, string(pose), nil
+	return res.BindingAffinity, string(pose), res.DockedPDBQT, nil
 }
 
 // ensureReceptorPDBQT prepares a run's receptor PDBQT for a track once and caches it

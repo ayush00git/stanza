@@ -67,12 +67,30 @@ type PocketAnalysis struct {
 // LigandDock is one molecule docked into both tracks of a run (Stage 4): the
 // resistance pocket of the WT structure and of the mutant structure.
 type LigandDock struct {
-	SMILES        string  `json:"smiles"`
-	WTScore       float64 `json:"wt_score"`     // Vina affinity (kcal/mol); more negative = stronger
-	MutantScore   float64 `json:"mutant_score"` // Vina affinity (kcal/mol)
-	Selectivity   float64 `json:"selectivity"`  // wt_score - mutant_score; large positive spares WT
-	WTPosePDB     string  `json:"wt_pose_pdb,omitempty"`
-	MutantPosePDB string  `json:"mutant_pose_pdb,omitempty"`
+	SMILES      string  `json:"smiles"`
+	WTScore     float64 `json:"wt_score"`     // Vina affinity (kcal/mol); more negative = stronger
+	MutantScore float64 `json:"mutant_score"` // mutant affinity; covalent-adjusted when Covalent != nil
+	Selectivity float64 `json:"selectivity"`  // wt_score - mutant_score; large positive spares WT
+	WTPosePDB   string  `json:"wt_pose_pdb,omitempty"`
+	MutantPosePDB string `json:"mutant_pose_pdb,omitempty"`
+	// Covalent is set when the mutant track modelled a covalent tether to the mutated
+	// cysteine; MutantScore then includes the covalent credit and MutantPosePDB is the
+	// tethered complex. nil for non-covalent molecules or non-cysteine targets.
+	Covalent *CovalentDock `json:"covalent,omitempty"`
+}
+
+// CovalentDock records the covalent-tether model applied to the mutant track. Vina
+// scores non-covalently, so the WT/mutant selectivity of a covalent warhead is
+// invisible to it; this captures the geometry that recovers it — whether the
+// warhead reaches the cysteine thiol — and the credit that models the bond only the
+// mutant can form.
+type CovalentDock struct {
+	TargetResidue    string  `json:"target_residue"`     // e.g. "Cys12"
+	WarheadType      string  `json:"warhead_type"`       // e.g. "acrylamide"
+	ReachDistance    float64 `json:"reach_distance"`     // best warhead-C → thiol-SG across modes (Å)
+	Credit           float64 `json:"credit"`             // covalent credit applied to the mutant score (kcal/mol)
+	NonCovalentScore float64 `json:"non_covalent_score"` // raw Vina mutant affinity before the credit
+	BondDistance     float64 `json:"bond_distance,omitempty"` // S–C of the emitted tether pose (Å)
 }
 
 // Candidate is a Stage-6 molecule proposed by Claude that passed the Stage-5 RDKit

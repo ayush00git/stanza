@@ -128,13 +128,19 @@ ON CONFLICT (run_id, smiles_hash) DO NOTHING`
 	}
 	const insertDock = `
 INSERT INTO docks (id, run_id, smiles, smiles_hash, wt_score, mutant_score,
-                   selectivity, wt_pose_pdb, mutant_pose_pdb)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                   selectivity, wt_pose_pdb, mutant_pose_pdb, covalent)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 ON CONFLICT (run_id, smiles_hash) DO NOTHING`
 	for _, d := range run.Docks {
+		var covalent any
+		if d.Covalent != nil {
+			if covalent, err = jsonbOrNil(d.Covalent); err != nil {
+				return err
+			}
+		}
 		if _, err = tx.Exec(ctx, insertDock,
 			uuid.NewString(), run.ID, d.SMILES, smilesHash(d.SMILES), d.WTScore,
-			d.MutantScore, d.Selectivity, d.WTPosePDB, d.MutantPosePDB,
+			d.MutantScore, d.Selectivity, d.WTPosePDB, d.MutantPosePDB, covalent,
 		); err != nil {
 			return err
 		}
@@ -220,7 +226,7 @@ FROM molecules WHERE run_id = $1 ORDER BY created_at`, runID)
 // loadDocks reads a run's paired docks oldest-first.
 func (s *Store) loadDocks(ctx context.Context, runID string) ([]models.LigandDock, error) {
 	rows, err := s.Pool.Query(ctx, `
-SELECT smiles, wt_score, mutant_score, selectivity, wt_pose_pdb, mutant_pose_pdb
+SELECT smiles, wt_score, mutant_score, selectivity, wt_pose_pdb, mutant_pose_pdb, covalent
 FROM docks WHERE run_id = $1 ORDER BY created_at`, runID)
 	if err != nil {
 		return nil, err
@@ -230,8 +236,14 @@ FROM docks WHERE run_id = $1 ORDER BY created_at`, runID)
 	var out []models.LigandDock
 	for rows.Next() {
 		var d models.LigandDock
-		if err := rows.Scan(&d.SMILES, &d.WTScore, &d.MutantScore, &d.Selectivity, &d.WTPosePDB, &d.MutantPosePDB); err != nil {
+		var covalent []byte
+		if err := rows.Scan(&d.SMILES, &d.WTScore, &d.MutantScore, &d.Selectivity, &d.WTPosePDB, &d.MutantPosePDB, &covalent); err != nil {
 			return nil, err
+		}
+		if len(covalent) > 0 {
+			if err := json.Unmarshal(covalent, &d.Covalent); err != nil {
+				return nil, err
+			}
 		}
 		out = append(out, d)
 	}

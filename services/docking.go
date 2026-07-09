@@ -108,12 +108,15 @@ const (
 )
 
 // VinaOptions tune one docking run. A zero BoxSize derives the box from the
-// pocket's volume; a zero Seed uses DefaultDockSeed.
+// pocket's volume; a zero Seed uses DefaultDockSeed; a zero NumModes uses Vina's
+// default. More modes let the covalent-reach scan inspect lower-ranked poses whose
+// warhead points at the thiol without changing the best (mode-1) score.
 type VinaOptions struct {
 	Exhaustiveness int
 	CPU            int
 	Seed           int
 	BoxSize        float64
+	NumModes       int
 }
 
 // boxSizeFor returns the cube edge (Å) enclosing a pocket plus padding, clamped to
@@ -141,8 +144,7 @@ func RunVinaDock(receptorPDBQT, ligandPDBQT string, pocket models.Pocket, opts V
     if seed == 0 {
         seed = DefaultDockSeed
     }
-    cmd := exec.Command(
-        "vina",
+    args := []string{
         "--receptor", receptorPDBQT,
         "--ligand", ligandPDBQT,
         "--center_x", fmt.Sprintf("%.3f", pocket.Center[0]),
@@ -155,7 +157,11 @@ func RunVinaDock(receptorPDBQT, ligandPDBQT string, pocket models.Pocket, opts V
         "--cpu", fmt.Sprint(opts.CPU),
         "--seed", fmt.Sprint(seed),
         "--out", outPDBQT,
-    )
+    }
+    if opts.NumModes > 0 {
+        args = append(args, "--num_modes", fmt.Sprint(opts.NumModes))
+    }
+    cmd := exec.Command("vina", args...)
     var stdout, stderr bytes.Buffer
     cmd.Stdout = &stdout
     cmd.Stderr = &stderr
