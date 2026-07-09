@@ -87,6 +87,9 @@ type MutantPocket struct {
 	Polarity       float64    `json:"polarity,omitempty"`
 	Center         [3]float64 `json:"center"` // docking-box seed
 	PocketID       int        `json:"pocket_id"`
+	// SelectionMethod records why this pocket was chosen — a curated known site, or
+	// druggability-weighted proximity to the mutated residue.
+	SelectionMethod string `json:"selection_method,omitempty"`
 }
 
 // PocketDelta is what the mutation changed, WT -> mutant, for the resistance pocket.

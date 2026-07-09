@@ -53,13 +53,14 @@ func BuildPocketAnalysis(ctx context.Context, run *models.Run) (*models.PocketAn
 
 	conserved, wtOnly, emergent := matchPockets(wtPockets, mutPockets)
 
-	// The resistance pocket on the mutant track: the one containing the mutated
-	// residue — the site we design against. For a clean delta, pair it with its
-	// spatially-corresponding WT pocket (nearest center) rather than the WT pocket
-	// independently found around the residue: the two structures differ by a single
-	// side chain, so the same pocket barely moves, and this avoids inflated deltas
-	// when fpocket partitions the residue's pocket differently between the tracks.
-	mutRP := findResistancePocket(mutPockets, chain, pos, mutPath)
+	// The resistance pocket on the mutant track: the site we design against, chosen
+	// by druggability-weighted proximity to the mutated residue. For a clean delta,
+	// pair it with its spatially-corresponding WT pocket (nearest center) rather than
+	// the WT pocket independently found around the residue: the two structures differ
+	// by a single side chain, so the same pocket barely moves, and this avoids
+	// inflated deltas when fpocket partitions the residue's pocket differently
+	// between the tracks.
+	mutRP, method := selectResistancePocket(mutPockets, chain, pos, mutPath)
 	var wtRP *models.Pocket
 	if mutRP != nil {
 		wtRP = nearestPocketWithin(wtPockets, mutRP.Center, resistancePairRadius)
@@ -68,7 +69,7 @@ func BuildPocketAnalysis(ctx context.Context, run *models.Run) (*models.PocketAn
 	var context *models.MutantPocketContext
 	if mutRP != nil {
 		context = buildMutantContext(wtRP, mutRP, chain, pos,
-			run.Mutagenesis.WildTypeResidue, run.Mutagenesis.MutantResidue)
+			run.Mutagenesis.WildTypeResidue, run.Mutagenesis.MutantResidue, method)
 	}
 
 	return &models.PocketAnalysis{
@@ -110,40 +111,6 @@ func matchPockets(wt, mutant []models.Pocket) (conserved, wtOnly, emergent int) 
 	return conserved, wtOnly, emergent
 }
 
-// findResistancePocket returns the pocket that contains the mutated residue on the
-// target chain. Falls back to the pocket whose center is nearest the mutated
-// residue's atoms when no pocket lists the residue (allosteric / surface mutation).
-func findResistancePocket(pockets []models.Pocket, chain string, pos int, structPath string) *models.Pocket {
-	for i := range pockets {
-		p := &pockets[i]
-		for k, idx := range p.ResidueIndices {
-			if idx != pos {
-				continue
-			}
-			if k < len(p.ResidueChains) && p.ResidueChains[k] != chain {
-				continue
-			}
-			return p
-		}
-	}
-
-	// Fallback: nearest pocket center to the mutated residue's coordinates.
-	coords := getResiduesCoordsFromOriginal(structPath, []int{pos}, []string{chain})
-	if len(coords) == 0 || len(pockets) == 0 {
-		return nil
-	}
-	target := computeCenter(coords)
-	best := &pockets[0]
-	bestD := distance3D(best.Center, target)
-	for i := 1; i < len(pockets); i++ {
-		if d := distance3D(pockets[i].Center, target); d < bestD {
-			bestD = d
-			best = &pockets[i]
-		}
-	}
-	return best
-}
-
 // nearestPocketWithin returns the pocket whose center is closest to the given
 // point, provided it is within maxDist; otherwise nil.
 func nearestPocketWithin(pockets []models.Pocket, center [3]float64, maxDist float64) *models.Pocket {
@@ -162,14 +129,16 @@ func nearestPocketWithin(pockets []models.Pocket, center [3]float64, maxDist flo
 }
 
 // buildMutantContext assembles the resistance pocket + WT→mutant delta payload.
-func buildMutantContext(wtRP, mutRP *models.Pocket, chain string, pos int, wtName, mutName string) *models.MutantPocketContext {
+// method records how the resistance pocket was chosen.
+func buildMutantContext(wtRP, mutRP *models.Pocket, chain string, pos int, wtName, mutName, method string) *models.MutantPocketContext {
 	mp := models.MutantPocket{
-		KeyResidues:    keyResidues(mutRP, chain, pos, mutName),
-		Volume:         mutRP.Volume,
-		Hydrophobicity: mutRP.Hydrophobicity,
-		Polarity:       mutRP.Polarity,
-		Center:         mutRP.Center,
-		PocketID:       mutRP.PocketID,
+		KeyResidues:     keyResidues(mutRP, chain, pos, mutName),
+		Volume:          mutRP.Volume,
+		Hydrophobicity:  mutRP.Hydrophobicity,
+		Polarity:        mutRP.Polarity,
+		Center:          mutRP.Center,
+		PocketID:        mutRP.PocketID,
+		SelectionMethod: method,
 	}
 
 	delta := models.PocketDelta{
