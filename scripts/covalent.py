@@ -148,20 +148,31 @@ def receptor_heavy_atoms(pdb_path, skip_chain, skip_resnum):
     return out
 
 
-def pose_modes(pose_path, template):
-    """Read a Vina multi-mode docked PDBQT into a list of RDKit molecules, one per
-    mode, with bond orders taken from the ligand template.
+def pose_query(template):
+    """A substructure query that identifies the ligand by its ATOMS AND TOPOLOGY, with
+    bond orders left unconstrained.
 
-    Why SDF rather than PDB: a PDB carries no bond orders, so RDKit re-perceives them
-    from interatomic distances, which yields wrong CONNECTIVITY on perfectly good
-    poses — a five-bonded piperazine nitrogen — and every mode is then discarded,
-    silently turning a covalent molecule into a non-covalent one. OpenBabel writes an
-    explicit bond block into SDF, which fixes the connectivity.
+    A docked pose is coordinates. To read chemistry back out of it, OpenBabel must
+    guess bonds from interatomic distances, and on drug-like scaffolds it guesses
+    wrong: fused heteroaromatics come back with bad hydrogen counts, which leaves
+    stray radicals and destroys the aromatic perception. RDKit then rejects the
+    molecule outright (every SDF record sanitizes to None) or accepts a mangled one
+    whose bonds no longer match the template. Either way the warhead is never located
+    and a covalent molecule is silently scored as non-covalent.
 
-    Bond ORDERS still need repairing: OpenBabel infers them from geometry too, and on
-    a docked pose it reads a nitrile as a single bond. With the connectivity correct,
-    AssignBondOrdersFromTemplate can impose the template's orders, which both makes
-    the template match exactly and gives build_tether the real C=C to open.
+    So never ask the pose what the molecule is. The elements and the bond graph are
+    enough to pin every atom down uniquely, and both survive a bad bond-order guess.
+    """
+    params = Chem.AdjustQueryParameters.NoAdjustments()
+    params.makeBondsGeneric = True
+    return Chem.AdjustQueryProperties(Chem.Mol(template), params)
+
+
+def pose_modes(pose_path):
+    """Read a Vina multi-mode docked PDBQT into one RDKit molecule per mode, WITHOUT
+    sanitizing: these molecules supply coordinates only, and sanitization would reject
+    them for a bad valence that OpenBabel invented and that we are about to ignore.
+    Ring info is still needed for substructure matching, hence FastFindRings.
     """
     workdir = tempfile.mkdtemp(prefix="covpose-")
     sdf = os.path.join(workdir, "modes.sdf")
@@ -170,57 +181,66 @@ def pose_modes(pose_path, template):
     if not os.path.exists(sdf):
         return []
     out = []
-    for m in Chem.SDMolSupplier(sdf, removeHs=False):
+    for m in Chem.SDMolSupplier(sdf, removeHs=False, sanitize=False):
         if m is None:
             continue
-        try:
-            out.append(AllChem.AssignBondOrdersFromTemplate(template, m))
-        except Exception:  # noqa: BLE001 - a mode we cannot map is a mode we skip
-            continue
+        m.UpdatePropertyCache(strict=False)
+        Chem.FastFindRings(m)
+        out.append(m)
     return out
 
 
-def electrophile_indices(mol, template, e_template_idx):
-    """Indices of the warhead electrophilic carbon in a docked-pose molecule, mapped
-    through the ligand template. Symmetric molecules admit several matches, so every
-    candidate is returned and the caller takes the closest."""
-    out = []
-    for match in mol.GetSubstructMatches(template):
-        if e_template_idx < len(match):
-            out.append(match[e_template_idx])
-    return out
+def scan_reach(query, e_template_idx, mols, sg):
+    """Across all docked modes, return (min electrophile→SG distance, best mode mol,
+    its template→pose atom mapping), or (None, None, None) when no mode matched.
 
-
-def scan_reach(template, e_template_idx, mols, sg):
-    """Across all docked modes, return (min electrophile→SG distance, best mode mol),
-    or (None, None) when no mode could be mapped onto the template."""
-    best_d, best_mol = None, None
+    Symmetric molecules admit several mappings, so every one is tried and the closest
+    approach wins.
+    """
+    best = (None, None, None)
     for m in mols:
         conf = m.GetConformer()
-        for idx in electrophile_indices(m, template, e_template_idx):
-            p = conf.GetAtomPosition(idx)
+        for match in m.GetSubstructMatches(query):
+            p = conf.GetAtomPosition(match[e_template_idx])
             d = math.dist((p.x, p.y, p.z), sg)
-            if best_d is None or d < best_d:
-                best_d, best_mol = d, m
-    return best_d, best_mol
+            if best[0] is None or d < best[0]:
+                best = (d, m, match)
+    return best
 
 
-def build_tether(template, tidx, mech, docked, cys, receptor_atoms, out_pdb):
+def template_on_pose(template, mol, match):
+    """The template molecule — correct chemistry, from the SMILES — carrying the docked
+    pose's coordinates. This is what the tether is built from, so a wrong bond order
+    guessed off the pose can never reach the covalent complex."""
+    t = Chem.Mol(template)
+    t.RemoveAllConformers()
+    src = mol.GetConformer()
+    conf = Chem.Conformer(t.GetNumAtoms())
+    for ti in range(t.GetNumAtoms()):
+        p = src.GetAtomPosition(match[ti])
+        conf.SetAtomPosition(ti, Point3D(p.x, p.y, p.z))
+    t.AddConformer(conf, assignId=True)
+    return t
+
+
+def build_tether(posed, tidx, mech, cys, receptor_atoms, out_pdb):
     """Form the covalent bond from the best docked pose: bond the warhead
     electrophilic carbon to Cys SG and minimise with CA/CB/SG frozen and the ligand
     restrained toward its docked coordinates, so the bond closes while the pocket
     pose is largely preserved.
+
+    `posed` is the TEMPLATE molecule carrying the docked coordinates, so its bond
+    orders and hydrogen counts are the SMILES' and not OpenBabel's guess — opening the
+    warhead's C=C is only meaningful if that bond really is a double bond.
 
     Returns a dict with the achieved S–C distance, the heavy-atom RMSD from the
     docked pose, and the closest receptor contact. Raises ValueError when the bond
     could not be closed or the resulting pose clashes with the receptor — a tether
     that reports success with a 2.4 Å "bond" is worse than no tether at all.
     """
-    dm = Chem.AddHs(docked, addCoords=True)
-    match = dm.GetSubstructMatch(template)
-    if not match:
-        raise ValueError("docked pose does not match the ligand template")
-    e_d, second_d = match[tidx[0]], match[tidx[1]]
+    # AddHs appends hydrogens after the heavy atoms, so template indices still hold.
+    dm = Chem.AddHs(posed, addCoords=True)
+    e_d, second_d = tidx[0], tidx[1]
 
     ref = dm.GetConformer()
     heavy_ref = {i: tuple(ref.GetAtomPosition(i)) for i in range(dm.GetNumAtoms())
@@ -350,8 +370,8 @@ def cmd_assess(args):
         print(json.dumps(result))
         return 0
 
-    mols = pose_modes(args.pose, template)
-    reach, best = scan_reach(template, tidx[0], mols, cys["SG"])
+    mols = pose_modes(args.pose)
+    reach, best, match = scan_reach(pose_query(template), tidx[0], mols, cys["SG"])
     if reach is None:
         # The pose exists but nothing in it could be mapped to the ligand. This is a
         # broken measurement, not a molecule that fails to reach — say so.
@@ -373,7 +393,8 @@ def cmd_assess(args):
     if want_tether:
         try:
             rec = receptor_heavy_atoms(args.receptor, args.chain, args.resnum)
-            info = build_tether(template, tidx, mech, best, cys, rec, args.tether_out)
+            posed = template_on_pose(template, best, match)
+            info = build_tether(posed, tidx, mech, cys, rec, args.tether_out)
             result.update(info)
             result["tether_written"] = True
         except Exception as exc:  # noqa: BLE001 - the tether pose is best-effort
