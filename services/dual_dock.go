@@ -56,15 +56,25 @@ func DockLigandDualTrack(ctx context.Context, run *models.Run, smiles string) (*
 		return nil, fmt.Errorf("dock: ligand prep: %w", err)
 	}
 
-	// The tracks share the ligand, the box and the seed sequence's first seed, so a
-	// WT/mutant affinity difference can still only come from the receptor. Only the
-	// mutant track is replicated: it is the one carrying the noisy covalent geometry.
-	wt, err := dockTrack(run.ID, "wt", ligPDBQT, pocket, filepath.Join(tmp, "wt"), wtSeeds)
+	// Replicate seeds exist solely to stabilise the covalent geometry, so only a molecule
+	// that can actually bond the target earns them. A SMILES substructure check settles
+	// that in ~0.2s, before any docking: no warhead means nothing to reach the thiol
+	// with, and no reason to dock the mutant five times.
+	covalent := isCovalentTarget(run.Mutagenesis.MutantResidue) && ligandHasWarhead(ctx, smiles)
+	mutSeeds := singleSeed
+	if covalent {
+		mutSeeds = covalentSeeds
+	}
+
+	// The tracks share the ligand, the box and the first seed, so a WT/mutant affinity
+	// difference can still only come from the receptor. Only the mutant track is ever
+	// replicated: it is the one carrying the noisy covalent geometry.
+	wt, err := dockTrack(run.ID, "wt", ligPDBQT, pocket, filepath.Join(tmp, "wt"), singleSeed)
 	if err != nil {
 		return nil, fmt.Errorf("dock: WT track: %w", err)
 	}
 	mutDir := filepath.Join(tmp, "mutant")
-	mut, err := dockTrack(run.ID, "mutant", ligPDBQT, pocket, mutDir, screenSeeds)
+	mut, err := dockTrack(run.ID, "mutant", ligPDBQT, pocket, mutDir, mutSeeds)
 	if err != nil {
 		return nil, fmt.Errorf("dock: mutant track: %w", err)
 	}
@@ -80,12 +90,11 @@ func DockLigandDualTrack(ctx context.Context, run *models.Run, smiles string) (*
 		MutantPosePDB: mutBest.posePDB,
 	}
 
-	// Covalent geometry: when the mutated residue is a cysteine and the ligand carries
-	// a warhead, report whether that warhead can actually attack the thiol. This is
-	// recorded BESIDE the affinity, never inside it — the covalent bond is not a Vina
+	// Covalent geometry: report whether the warhead can actually attack the thiol. This
+	// is recorded BESIDE the affinity, never inside it — the covalent bond is not a Vina
 	// energy, and a constant folded into MutantScore would turn Selectivity into a
 	// restatement of that constant.
-	if isCovalentTarget(run.Mutagenesis.MutantResidue) {
+	if covalent {
 		if cov := assessCovalentGeometry(ctx, run, smiles, mut, mutDir); cov != nil {
 			covDock := cov.CovalentDock
 			dock.Covalent = &covDock
@@ -101,6 +110,17 @@ func DockLigandDualTrack(ctx context.Context, run *models.Run, smiles string) (*
 	// covalent inhibitor's real selectivity is kinetic and lives in Covalent, not here.
 	dock.Selectivity = round2(wtScore - mutScore)
 	return dock, nil
+}
+
+// ligandHasWarhead reports whether a SMILES carries a cysteine-reactive warhead.
+//
+// A detection failure is treated as "yes". The false positive costs two extra docks and
+// then reports assess_failed honestly; the false negative would silently skip the
+// covalent assessment altogether and hand back a molecule labelled non-covalent — the
+// exact class of silent negative this pipeline has already been bitten by twice.
+func ligandHasWarhead(ctx context.Context, smiles string) bool {
+	has, _, err := HasCovalentWarhead(ctx, smiles)
+	return err != nil || has
 }
 
 // replicate is one seed's docking of a ligand into one track.
@@ -289,7 +309,8 @@ const (
 // the thiol.
 const screenNumModes = 20
 
-// screenSeeds are the replicate seeds the MUTANT track is docked under.
+// covalentSeeds are the replicate seeds the MUTANT track is docked under when — and
+// only when — the ligand can actually form a covalent bond.
 //
 // Vina's affinity is reproducible across seeds (sd ~0.03 kcal/mol) but the covalent
 // GEOMETRY is not: with the ligand conformer held fixed, the warhead's closest approach
@@ -298,22 +319,29 @@ const screenNumModes = 20
 // that geometry, so a single-seed answer is a coin toss reported to two decimals.
 // Replicating lets us take the median and, more importantly, flag the molecules whose
 // call is not stable.
-var screenSeeds = []int{42, 1337, 7, 101, 2024}
-
-// wtSeeds docks the wild-type track once.
 //
-// The WT track contributes only an affinity, and affinity is the reproducible quantity
-// — four more seeds re-measure the same number to within 0.05 kcal/mol. Nothing on the
-// WT side feeds the covalent geometry, because Gly12 has no thiol to reach. This breaks
-// the "identical protocol on both tracks" symmetry deliberately: that symmetry defended
-// the selectivity margin, which is now known to be ~0 by construction and no longer
-// ranks anything.
-var wtSeeds = screenSeeds[:1]
+// Three seeds rather than five: an odd count keeps the median unambiguous, and three
+// still yields a spread and detects a call that straddles zero. It is a coarser estimate
+// of the spread, not an absent one.
+var covalentSeeds = []int{42, 1337, 7}
+
+// singleSeed docks a track once, under the same first seed the replicates start from.
+//
+// It is used for the wild-type track always, and for the mutant track whenever the
+// ligand carries no warhead. In both cases the dock contributes only an affinity, and
+// affinity is the reproducible quantity — extra seeds re-measure the same number to
+// within 0.05 kcal/mol. Nothing there feeds the covalent geometry: the WT's Gly12 has no
+// thiol to reach, and a molecule with no warhead has nothing to reach with.
+//
+// This deliberately breaks the "identical protocol on both tracks" symmetry. That
+// symmetry defended the selectivity margin, which is now known to be ~0 by construction
+// and no longer ranks anything.
+var singleSeed = covalentSeeds[:1]
 
 // maxParallelDocks bounds the seed replicates run at once. Each Vina process is pinned
 // to screenCPU cores, so this must stay small enough that the pool does not oversubscribe
 // the machine — an oversubscribed Vina is slower, not faster.
-const maxParallelDocks = 5
+const maxParallelDocks = 3
 
 // screenVinaOptions is the per-seed template; both tracks share box, mode count and
 // the seed list, so a WT/mutant difference can still only come from the receptor.

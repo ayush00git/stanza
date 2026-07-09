@@ -150,20 +150,47 @@ func TestSeedStraddlingFeasibilityIsUncertain(t *testing.T) {
 	}
 }
 
-// Both tracks must be docked under the same seeds, or a WT/mutant difference could
-// come from the search rather than the receptor.
-func TestScreenSeedsAreOddAndShared(t *testing.T) {
-	if len(screenSeeds) < 3 {
-		t.Fatalf("only %d replicate seeds; reach spread cannot be estimated", len(screenSeeds))
+// The replicate seeds must admit an unambiguous median and a real spread, and the
+// single-seed tracks must start from a seed the replicates also use — otherwise a
+// WT/mutant affinity difference could come from the search rather than the receptor.
+func TestCovalentSeedsAreOddDistinctAndShareTheSingleSeed(t *testing.T) {
+	if len(covalentSeeds) < 3 {
+		t.Fatalf("only %d replicate seeds; the feasibility spread cannot be estimated", len(covalentSeeds))
 	}
-	if len(screenSeeds)%2 == 0 {
-		t.Errorf("%d seeds: an even count makes the median ambiguous", len(screenSeeds))
+	if len(covalentSeeds)%2 == 0 {
+		t.Errorf("%d seeds: an even count makes the median ambiguous", len(covalentSeeds))
 	}
 	seen := map[int]bool{}
-	for _, s := range screenSeeds {
+	for _, s := range covalentSeeds {
 		if seen[s] {
 			t.Errorf("duplicate replicate seed %d", s)
 		}
 		seen[s] = true
+	}
+	if len(singleSeed) != 1 {
+		t.Fatalf("singleSeed carries %d seeds, want exactly 1", len(singleSeed))
+	}
+	if singleSeed[0] != covalentSeeds[0] {
+		t.Errorf("singleSeed %d is not the replicates' first seed %d: the WT track and the "+
+			"mutant replicates would no longer share a search", singleSeed[0], covalentSeeds[0])
+	}
+}
+
+// Replicates only ever stabilise the covalent geometry, so a molecule that cannot bond
+// the target must not pay for them. A detection failure, though, must fall back to
+// assessing (and therefore replicating): a silent "no warhead" is how a broken
+// measurement passes for a molecule that simply is not covalent.
+func TestLigandHasWarheadFailsOpen(t *testing.T) {
+	skipUnlessCovalent(t)
+	if !ligandHasWarhead(context.Background(), "C=CC(=O)N1CCNCC1") {
+		t.Error("acrylamide reported as having no warhead")
+	}
+	if ligandHasWarhead(context.Background(), "CC(=O)N1CCNCC1") {
+		t.Error("saturated amide reported as having a warhead")
+	}
+	// An unparseable SMILES makes the helper error; it must fail open, not silently
+	// declare the molecule non-covalent.
+	if !ligandHasWarhead(context.Background(), "this is not a smiles") {
+		t.Error("a failed warhead detection must fail open, not report 'no warhead'")
 	}
 }
