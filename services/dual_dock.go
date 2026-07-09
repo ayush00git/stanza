@@ -3,6 +3,7 @@ package services
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/ayush00git/stanza/models"
 )
@@ -54,14 +56,15 @@ func DockLigandDualTrack(ctx context.Context, run *models.Run, smiles string) (*
 		return nil, fmt.Errorf("dock: ligand prep: %w", err)
 	}
 
-	// Both tracks are docked under the same replicate seeds, so a WT/mutant
-	// difference can still only come from the receptor.
-	wt, err := dockTrack(run.ID, "wt", ligPDBQT, pocket, filepath.Join(tmp, "wt"))
+	// The tracks share the ligand, the box and the seed sequence's first seed, so a
+	// WT/mutant affinity difference can still only come from the receptor. Only the
+	// mutant track is replicated: it is the one carrying the noisy covalent geometry.
+	wt, err := dockTrack(run.ID, "wt", ligPDBQT, pocket, filepath.Join(tmp, "wt"), wtSeeds)
 	if err != nil {
 		return nil, fmt.Errorf("dock: WT track: %w", err)
 	}
 	mutDir := filepath.Join(tmp, "mutant")
-	mut, err := dockTrack(run.ID, "mutant", ligPDBQT, pocket, mutDir)
+	mut, err := dockTrack(run.ID, "mutant", ligPDBQT, pocket, mutDir, screenSeeds)
 	if err != nil {
 		return nil, fmt.Errorf("dock: mutant track: %w", err)
 	}
@@ -286,16 +289,31 @@ const (
 // the thiol.
 const screenNumModes = 20
 
-// screenSeeds are the replicate seeds each track is docked under.
+// screenSeeds are the replicate seeds the MUTANT track is docked under.
 //
 // Vina's affinity is reproducible across seeds (sd ~0.03 kcal/mol) but the covalent
-// REACH is not: with the ligand conformer held fixed, the warhead's closest approach
-// to the thiol varied by ±0.16–1.09 Å over five seeds, and on one molecule the credit
-// swung between 0.00 and 3.42 kcal/mol depending on nothing but the RNG. Since the
-// whole selectivity margin of a covalent binder is a function of reach, a single-seed
-// reach is a coin toss reported to two decimals. Replicating lets us take the median
-// and, more importantly, report the spread.
+// GEOMETRY is not: with the ligand conformer held fixed, the warhead's closest approach
+// to the thiol varied by ±0.16–1.09 Å over five seeds, and on one molecule the covalent
+// call flipped outright depending on nothing but the RNG. Feasibility is a function of
+// that geometry, so a single-seed answer is a coin toss reported to two decimals.
+// Replicating lets us take the median and, more importantly, flag the molecules whose
+// call is not stable.
 var screenSeeds = []int{42, 1337, 7, 101, 2024}
+
+// wtSeeds docks the wild-type track once.
+//
+// The WT track contributes only an affinity, and affinity is the reproducible quantity
+// — four more seeds re-measure the same number to within 0.05 kcal/mol. Nothing on the
+// WT side feeds the covalent geometry, because Gly12 has no thiol to reach. This breaks
+// the "identical protocol on both tracks" symmetry deliberately: that symmetry defended
+// the selectivity margin, which is now known to be ~0 by construction and no longer
+// ranks anything.
+var wtSeeds = screenSeeds[:1]
+
+// maxParallelDocks bounds the seed replicates run at once. Each Vina process is pinned
+// to screenCPU cores, so this must stay small enough that the pool does not oversubscribe
+// the machine — an oversubscribed Vina is slower, not faster.
+const maxParallelDocks = 5
 
 // screenVinaOptions is the per-seed template; both tracks share box, mode count and
 // the seed list, so a WT/mutant difference can still only come from the receptor.
@@ -308,37 +326,68 @@ func screenVinaOptions(seed int) VinaOptions {
 	}
 }
 
-// dockTrack docks the prepared ligand into a run's structure for one track once per
+// dockTrack docks the prepared ligand into a run's structure for one track, once per
 // replicate seed, reusing the run's cached receptor PDBQT (prepared once via
 // ensureReceptorPDBQT). The returned pose paths stay valid until the caller cleans
 // outDir.
-func dockTrack(runID, track, ligandPDBQT string, pocket models.Pocket, outDir string) ([]replicate, error) {
+//
+// The seeds run concurrently. Each writes into its own seed directory, and the receptor
+// PDBQT is prepared before the pool starts so the replicates only ever read it — Vina
+// itself is deterministic given (seed, cpu count), which is why screenCPU is pinned
+// rather than scaled to whatever cores happen to be free.
+func dockTrack(runID, track, ligandPDBQT string, pocket models.Pocket, outDir string, seeds []int) ([]replicate, error) {
 	receptorPDBQT, err := ensureReceptorPDBQT(runID, track)
 	if err != nil {
 		return nil, fmt.Errorf("receptor prep: %w", err)
 	}
-	reps := make([]replicate, 0, len(screenSeeds))
-	for _, seed := range screenSeeds {
-		seedDir := filepath.Join(outDir, "seed"+strconv.Itoa(seed))
-		if err := os.MkdirAll(seedDir, 0o755); err != nil {
-			return nil, err
-		}
-		res, err := RunVinaDock(receptorPDBQT, ligandPDBQT, pocket, screenVinaOptions(seed), seedDir)
-		if err != nil {
-			return nil, err
-		}
-		pose, _ := os.ReadFile(res.DockedPDB)
-		reps = append(reps, replicate{
-			seed:      seed,
-			affinity:  res.BindingAffinity,
-			posePDB:   string(pose),
-			posePDBQT: res.DockedPDBQT,
-		})
+
+	// Indexed writes, so the replicate order is the seed order regardless of which
+	// goroutine finishes first — a median must not depend on scheduling.
+	reps := make([]replicate, len(seeds))
+	errs := make([]error, len(seeds))
+
+	var wg sync.WaitGroup
+	slot := make(chan struct{}, maxParallelDocks)
+	for i, seed := range seeds {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			slot <- struct{}{}
+			defer func() { <-slot }()
+
+			seedDir := filepath.Join(outDir, "seed"+strconv.Itoa(seed))
+			if err := os.MkdirAll(seedDir, 0o755); err != nil {
+				errs[i] = err
+				return
+			}
+			res, err := RunVinaDock(receptorPDBQT, ligandPDBQT, pocket, screenVinaOptions(seed), seedDir)
+			if err != nil {
+				errs[i] = fmt.Errorf("seed %d: %w", seed, err)
+				return
+			}
+			pose, _ := os.ReadFile(res.DockedPDB)
+			reps[i] = replicate{
+				seed:      seed,
+				affinity:  res.BindingAffinity,
+				posePDB:   string(pose),
+				posePDBQT: res.DockedPDBQT,
+			}
+		}()
 	}
-	if len(reps) == 0 {
-		return nil, fmt.Errorf("no replicate produced a pose")
+	wg.Wait()
+
+	// One failed seed loses that replicate, not the dock: the median and the spread are
+	// still meaningful over the survivors. Only a total failure is an error.
+	live := reps[:0]
+	for i := range reps {
+		if errs[i] == nil {
+			live = append(live, reps[i])
+		}
 	}
-	return reps, nil
+	if len(live) == 0 {
+		return nil, fmt.Errorf("every replicate failed: %w", errors.Join(errs...))
+	}
+	return live, nil
 }
 
 // ensureReceptorPDBQT prepares a run's receptor PDBQT for a track once and caches it
