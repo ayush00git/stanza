@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -228,6 +229,136 @@ func DockRunHandler(c *gin.Context) {
 	DefaultRunStore.Put(run)
 	persistRun(c.Request.Context(), run)
 	c.JSON(http.StatusCreated, res)
+}
+
+// DockRunStreamHandler handles GET /runs/:id/dock/stream?smiles=… — the same Stage-4
+// dual-track dock as DockRunHandler, streamed over Server-Sent Events.
+//
+// Docking a molecule costs tens of seconds of CPU that cannot be optimised away: six
+// AutoDock Vina runs and, for a covalent ligand, a geometry assessment over every seed.
+// Streaming does not make it faster; it makes the wait legible. Events are `progress`
+// (a models.DockProgress per completed step), then exactly one of `dock` (the finished
+// models.LigandDock) or `error`, then `done`.
+//
+// EventSource can only issue GETs, so the SMILES arrives as a query parameter rather
+// than a JSON body.
+func DockRunStreamHandler(c *gin.Context) {
+	id := c.Param("id")
+	run, ok := DefaultRunStore.Get(id)
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "run not found"})
+		return
+	}
+	smiles := strings.TrimSpace(c.Query("smiles"))
+	if smiles == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "query parameter 'smiles' is required"})
+		return
+	}
+	if run.Mutagenesis == nil {
+		c.JSON(http.StatusConflict, gin.H{"error": "run has no mutant structure yet"})
+		return
+	}
+
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("X-Accel-Buffering", "no")
+
+	flusher, ok := c.Writer.(http.Flusher)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "streaming unsupported"})
+		return
+	}
+	w := c.Writer
+	ctx := c.Request.Context()
+
+	// The dock runs on this goroutine; progress arrives from the seed pool's goroutines,
+	// so every write to the response body is funnelled through this channel. Writing to
+	// an http.ResponseWriter from two goroutines is a data race.
+	type event struct {
+		name string
+		data any
+	}
+	events := make(chan event, 16)
+	send := func(name string, data any) {
+		b, err := json.Marshal(data)
+		if err != nil {
+			return
+		}
+		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", name, b)
+		flusher.Flush()
+	}
+
+	// Cache: the same molecule re-docked against this run streams straight back.
+	genMu.Lock()
+	for i := range run.Docks {
+		if run.Docks[i].SMILES == smiles {
+			hit := run.Docks[i]
+			genMu.Unlock()
+			send("dock", hit)
+			send("done", gin.H{"cached": true})
+			return
+		}
+	}
+	pocketsReady := run.Pockets != nil
+	genMu.Unlock()
+
+	// Stage-3 pocket analysis, if it hasn't run: docking needs the pocket box.
+	if !pocketsReady {
+		send("progress", models.DockProgress{Stage: "pockets", Message: "detecting the resistance pocket", Done: 0, Total: 0})
+		pa, err := services.BuildPocketAnalysis(ctx, run)
+		if err != nil {
+			send("error", gin.H{"error": fmt.Sprintf("pocket analysis: %v", err)})
+			return
+		}
+		genMu.Lock()
+		run.Pockets = pa
+		genMu.Unlock()
+	}
+
+	// Every send races the client hanging up. Without the ctx.Done() arm the docking
+	// goroutine would block forever on a channel nobody reads, leaking a goroutine — and
+	// the six Vina processes it is waiting on — for the life of the server.
+	emit := func(name string, data any) {
+		select {
+		case events <- event{name, data}:
+		case <-ctx.Done():
+		}
+	}
+
+	go func() {
+		defer close(events)
+		res, err := services.DockLigandDualTrackProgress(ctx, run, smiles, func(p models.DockProgress) {
+			emit("progress", p)
+		})
+		if err != nil {
+			emit("error", gin.H{"error": err.Error()})
+			return
+		}
+		genMu.Lock()
+		run.Docks = append(run.Docks, *res)
+		genMu.Unlock()
+		DefaultRunStore.Put(run)
+		// The result outlives the request: a client that navigated away still paid for the
+		// CPU, so the dock is persisted against a context the disconnect cannot cancel.
+		persistRun(context.WithoutCancel(ctx), run)
+		emit("dock", *res)
+	}()
+
+	for {
+		select {
+		case ev, open := <-events:
+			if !open {
+				send("done", gin.H{"cached": false})
+				return
+			}
+			send(ev.name, ev.data)
+		case <-ctx.Done():
+			// The client disconnected. The dock keeps running to completion so its result
+			// is still cached on the run — the CPU is already spent either way.
+			return
+		}
+	}
 }
 
 // ListRunDocksHandler handles GET /runs/:id/docks, returning the run's docked

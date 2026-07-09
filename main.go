@@ -83,6 +83,7 @@ func main() {
 	r.GET("/runs/:id/pockets", handlers.GetRunPocketsHandler)
 	// Stage-4 dual-track docking (WT + mutant) for a run.
 	r.POST("/runs/:id/dock", handlers.DockRunHandler)
+	r.GET("/runs/:id/dock/stream", handlers.DockRunStreamHandler)
 	r.GET("/runs/:id/docks", handlers.ListRunDocksHandler)
 	// Stage-7 selectivity scoring + ranking: the docked molecules as a fitness leaderboard.
 	r.GET("/runs/:id/ranking", handlers.GetRunRankingHandler)

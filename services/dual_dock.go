@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/ayush00git/stanza/models"
 )
@@ -23,6 +24,35 @@ import (
 // structures differ by a single side chain, so selectivity comes from the receptor
 // (the mutated residue), not from moving the box.
 func DockLigandDualTrack(ctx context.Context, run *models.Run, smiles string) (*models.LigandDock, error) {
+	return DockLigandDualTrackProgress(ctx, run, smiles, nil)
+}
+
+// ProgressFunc receives each completed docking step. It is called from the seed pool's
+// goroutines, so implementations must be safe to call concurrently — reporter() below
+// serialises them before they reach here.
+type ProgressFunc func(models.DockProgress)
+
+// reporter serialises progress callbacks and counts the steps, so a caller streaming to
+// a browser never sees two writes interleave or a step index go backwards.
+func reporter(onProgress ProgressFunc, total int) func(stage, message string, partial *models.DockPartial) {
+	if onProgress == nil {
+		return func(string, string, *models.DockPartial) {}
+	}
+	var mu sync.Mutex
+	done := 0
+	return func(stage, message string, partial *models.DockPartial) {
+		mu.Lock()
+		done++
+		p := models.DockProgress{Stage: stage, Message: message, Done: done, Total: total, Partial: partial}
+		mu.Unlock()
+		onProgress(p)
+	}
+}
+
+// DockLigandDualTrackProgress is DockLigandDualTrack with a step callback, so a slow
+// dock can report what it is doing instead of hiding behind a spinner. onProgress may
+// be nil.
+func DockLigandDualTrackProgress(ctx context.Context, run *models.Run, smiles string, onProgress ProgressFunc) (*models.LigandDock, error) {
 	smiles = strings.TrimSpace(smiles)
 	if smiles == "" {
 		return nil, fmt.Errorf("dock: empty ligand SMILES")
@@ -46,16 +76,6 @@ func DockLigandDualTrack(ctx context.Context, run *models.Run, smiles string) (*
 	}
 	defer os.RemoveAll(tmp)
 
-	// Prepare the ligand once; both docks reuse it.
-	ligPDB, err := SMILESTo3D(smiles, tmp)
-	if err != nil {
-		return nil, fmt.Errorf("dock: ligand 3D generation: %w", err)
-	}
-	ligPDBQT, err := PrepareLigand(ligPDB, tmp)
-	if err != nil {
-		return nil, fmt.Errorf("dock: ligand prep: %w", err)
-	}
-
 	// Replicate seeds exist solely to stabilise the covalent geometry, so only a molecule
 	// that can actually bond the target earns them. A SMILES substructure check settles
 	// that in ~0.2s, before any docking: no warhead means nothing to reach the thiol
@@ -66,26 +86,58 @@ func DockLigandDualTrack(ctx context.Context, run *models.Run, smiles string) (*
 		mutSeeds = covalentSeeds
 	}
 
+	// ligand prep + WT dock + one step per mutant seed + the mutant score, plus the
+	// covalent assessment. The scoring step is instant; it exists so the stream can hand
+	// over the mutant affinity and the selectivity the moment they are real.
+	total := 3 + len(mutSeeds)
+	if covalent {
+		total++
+	}
+	step := reporter(onProgress, total)
+
+	// Prepare the ligand once; both docks reuse it.
+	ligPDB, err := SMILESTo3D(smiles, tmp)
+	if err != nil {
+		return nil, fmt.Errorf("dock: ligand 3D generation: %w", err)
+	}
+	ligPDBQT, err := PrepareLigand(ligPDB, tmp)
+	if err != nil {
+		return nil, fmt.Errorf("dock: ligand prep: %w", err)
+	}
+	step("ligand", "3D conformer prepared", nil)
+
 	// The tracks share the ligand, the box and the first seed, so a WT/mutant affinity
 	// difference can still only come from the receptor. Only the mutant track is ever
 	// replicated: it is the one carrying the noisy covalent geometry.
-	wt, err := dockTrack(run.ID, "wt", ligPDBQT, pocket, filepath.Join(tmp, "wt"), singleSeed)
+	wt, err := dockTrack(run.ID, "wt", ligPDBQT, pocket, filepath.Join(tmp, "wt"), singleSeed, nil)
 	if err != nil {
 		return nil, fmt.Errorf("dock: WT track: %w", err)
 	}
+	wtBest := medianReplicate(wt)
+	wtScore := round2(wtBest.affinity)
+	step("wt", fmt.Sprintf("wild-type affinity %.2f kcal/mol", wtScore),
+		&models.DockPartial{WTScore: &wtScore})
+
 	mutDir := filepath.Join(tmp, "mutant")
-	mut, err := dockTrack(run.ID, "mutant", ligPDBQT, pocket, mutDir, mutSeeds)
+	var seedsDone atomic.Int32
+	mut, err := dockTrack(run.ID, "mutant", ligPDBQT, pocket, mutDir, mutSeeds, func() {
+		n := seedsDone.Add(1)
+		step("mutant", fmt.Sprintf("mutant pocket docked, seed %d of %d", n, len(mutSeeds)), nil)
+	})
 	if err != nil {
 		return nil, fmt.Errorf("dock: mutant track: %w", err)
 	}
 
-	wtBest, mutBest := medianReplicate(wt), medianReplicate(mut)
-	wtScore, mutScore := wtBest.affinity, mutBest.affinity
+	mutBest := medianReplicate(mut)
+	mutScore := round2(mutBest.affinity)
+	selectivity := round2(wtScore - mutScore)
+	step("mutant", fmt.Sprintf("mutant affinity %.2f kcal/mol (median of %d seeds)", mutScore, len(mut)),
+		&models.DockPartial{MutantScore: &mutScore, Selectivity: &selectivity})
 
 	dock := &models.LigandDock{
 		SMILES:        smiles,
-		WTScore:       round2(wtScore),
-		MutantScore:   round2(mutScore),
+		WTScore:       wtScore,
+		MutantScore:   mutScore,
 		WTPosePDB:     wtBest.posePDB,
 		MutantPosePDB: mutBest.posePDB,
 	}
@@ -101,6 +153,9 @@ func DockLigandDualTrack(ctx context.Context, run *models.Run, smiles string) (*
 			if cov.posePDB != "" {
 				dock.MutantPosePDB = cov.posePDB
 			}
+			step("covalent", covalentProgressMessage(&covDock), &models.DockPartial{Covalent: &covDock})
+		} else {
+			step("covalent", "no warhead detected", nil)
 		}
 	}
 
@@ -108,8 +163,27 @@ func DockLigandDualTrack(ctx context.Context, run *models.Run, smiles string) (*
 	// to be ~0: Gly12→Cys12 barely perturbs the reversible contact set, and pan-KRAS
 	// binders engage WT, G12C, G12D, G12V and G13D at indistinguishable affinity. A
 	// covalent inhibitor's real selectivity is kinetic and lives in Covalent, not here.
-	dock.Selectivity = round2(wtScore - mutScore)
+	dock.Selectivity = selectivity
 	return dock, nil
+}
+
+// covalentProgressMessage narrates the covalent verdict for the progress stream. The
+// user has just waited most of a minute; the least the last step can do is say what the
+// warhead did rather than "done".
+func covalentProgressMessage(c *models.CovalentDock) string {
+	switch c.Status {
+	case models.CovalentTethered, models.CovalentFeasible:
+		if c.Uncertain {
+			return fmt.Sprintf("%s warhead: attack geometry flips with the docking seed", c.WarheadType)
+		}
+		return fmt.Sprintf("%s warhead can attack %s (feasibility %.2f, reach %.2f Å)",
+			c.WarheadType, c.TargetResidue, c.Feasibility, c.ReachDistance)
+	case models.CovalentInfeasible:
+		return fmt.Sprintf("%s warhead cannot attack %s (reach %.2f Å, angle %.0f°)",
+			c.WarheadType, c.TargetResidue, c.ReachDistance, c.AttackAngle)
+	default:
+		return fmt.Sprintf("covalent geometry %s", c.Status)
+	}
 }
 
 // ligandHasWarhead reports whether a SMILES carries a cysteine-reactive warhead.
@@ -363,7 +437,9 @@ func screenVinaOptions(seed int) VinaOptions {
 // PDBQT is prepared before the pool starts so the replicates only ever read it — Vina
 // itself is deterministic given (seed, cpu count), which is why screenCPU is pinned
 // rather than scaled to whatever cores happen to be free.
-func dockTrack(runID, track, ligandPDBQT string, pocket models.Pocket, outDir string, seeds []int) ([]replicate, error) {
+// onSeed, when non-nil, fires as each replicate finishes. It is called from the pool's
+// goroutines and must be safe to call concurrently.
+func dockTrack(runID, track, ligandPDBQT string, pocket models.Pocket, outDir string, seeds []int, onSeed func()) ([]replicate, error) {
 	receptorPDBQT, err := ensureReceptorPDBQT(runID, track)
 	if err != nil {
 		return nil, fmt.Errorf("receptor prep: %w", err)
@@ -399,6 +475,9 @@ func dockTrack(runID, track, ligandPDBQT string, pocket models.Pocket, outDir st
 				affinity:  res.BindingAffinity,
 				posePDB:   string(pose),
 				posePDBQT: res.DockedPDBQT,
+			}
+			if onSeed != nil {
+				onSeed()
 			}
 		}()
 	}

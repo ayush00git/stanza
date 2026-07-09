@@ -706,6 +706,92 @@ export async function generateCandidates(
  * resolves with the paired scores + both poses (per-SMILES cached server-side, so
  * re-docking the same molecule is instant). Wraps POST /runs/:id/dock.
  */
+/**
+ * The subset of a LigandDock a given step has established. Mirrors models.DockPartial.
+ *
+ * A field absent here has not been computed yet — it is not zero. That distinction
+ * matters: a selectivity of exactly 0.00 is the *expected* answer for a covalent
+ * target, so "0" and "not yet known" must never render the same.
+ */
+export type DockPartial = {
+  wt_score?: number
+  mutant_score?: number
+  selectivity?: number
+  covalent?: CovalentDock
+}
+
+/** One completed step of a dual-track dock. Mirrors models.DockProgress. */
+export type DockProgress = {
+  stage: 'pockets' | 'ligand' | 'wt' | 'mutant' | 'covalent' | string
+  message: string
+  done: number
+  total: number
+  /** Results that exist at this step. The finished dock is assembled only at the end. */
+  partial?: DockPartial
+}
+
+export type DockStreamCallbacks = {
+  onProgress: (p: DockProgress) => void
+  onDock: (d: LigandDock) => void
+  onError: (message: string) => void
+  onDone: () => void
+}
+
+/**
+ * Dock one molecule and stream each step back as it finishes.
+ *
+ * Docking is six AutoDock Vina runs plus, for a covalent ligand, a geometry assessment
+ * over every seed — tens of seconds of CPU that cannot be optimised away. Streaming does
+ * not make it faster; it makes the wait legible. Returns a `cancel` function; calling it
+ * closes the stream but does NOT stop the dock, whose result is still cached on the run.
+ *
+ * EventSource can only issue GETs, so the SMILES travels as a query parameter.
+ */
+export function streamDockLigand(id: string, smiles: string, cb: DockStreamCallbacks): () => void {
+  const url = `/runs/${encodeURIComponent(id)}/dock/stream?smiles=${encodeURIComponent(smiles)}`
+  const es = new EventSource(url)
+  let closed = false
+  const close = () => {
+    if (!closed) {
+      closed = true
+      es.close()
+    }
+  }
+
+  const parse = <T,>(event: Event): T | null => {
+    try {
+      return JSON.parse((event as MessageEvent).data) as T
+    } catch {
+      return null
+    }
+  }
+
+  es.addEventListener('progress', (e) => {
+    const p = parse<DockProgress>(e)
+    if (p) cb.onProgress(p)
+  })
+  es.addEventListener('dock', (e) => {
+    const d = parse<LigandDock>(e)
+    if (d) cb.onDock(d)
+  })
+  es.addEventListener('done', () => {
+    cb.onDone()
+    close()
+  })
+
+  // Fires both for server-sent `event: error` frames (which carry data) and for native
+  // connection failures (which do not). EventSource auto-reconnects on the latter, and a
+  // reconnect would silently re-dock, so we must close().
+  es.addEventListener('error', (e) => {
+    if (closed) return
+    const data = (e as MessageEvent).data
+    cb.onError(data ? (parse<{ error: string }>(e)?.error ?? 'Docking failed') : 'Lost connection to the docking service.')
+    close()
+  })
+
+  return close
+}
+
 export async function dockRunLigand(
   id: string,
   smiles: string,

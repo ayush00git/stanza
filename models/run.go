@@ -82,6 +82,32 @@ type LigandDock struct {
 	Covalent *CovalentDock `json:"covalent,omitempty"`
 }
 
+// DockProgress is one completed step of a dual-track dock, streamed to the client
+// while the dock runs. Docking a single molecule costs several tens of seconds of CPU
+// — a cost that cannot be optimised away — so the least the interface can do is say
+// what it is spending that time on.
+type DockProgress struct {
+	Stage   string `json:"stage"`   // "ligand" | "wt" | "mutant" | "covalent"
+	Message string `json:"message"` // human-readable, e.g. "mutant dock, seed 2 of 3"
+	Done    int    `json:"done"`    // steps finished
+	Total   int    `json:"total"`   // steps expected; the last step lands on Done == Total
+	// Partial carries the results that exist AT THIS STEP, and nothing else. A field
+	// absent here has not been computed yet — it is not zero, and it is not pending in
+	// some buffer. The finished LigandDock is assembled only at the end.
+	Partial *DockPartial `json:"partial,omitempty"`
+}
+
+// DockPartial is the subset of a LigandDock that a given step has established. Every
+// field is a pointer so that "not yet computed" is distinguishable from a genuine zero
+// — a selectivity of exactly 0.00 is the expected answer for a covalent target, and it
+// must not be confused with a value the dock has not reached.
+type DockPartial struct {
+	WTScore     *float64      `json:"wt_score,omitempty"`
+	MutantScore *float64      `json:"mutant_score,omitempty"`
+	Selectivity *float64      `json:"selectivity,omitempty"`
+	Covalent    *CovalentDock `json:"covalent,omitempty"`
+}
+
 // Covalent assessment outcomes. A warhead that cannot reach the thiol and a warhead
 // whose measurement failed are different facts, and both differ from a molecule that
 // simply carries no warhead — reporting all three as "not covalent" is what let a

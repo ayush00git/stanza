@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { type CovalentDock, type Ranking } from '../../lib/api'
+import { type CovalentDock, type DockPartial, type DockProgress, type Ranking } from '../../lib/api'
 import CovalentBadge from './CovalentBadge'
 
 type Props = {
@@ -9,6 +9,96 @@ type Props = {
   /** SMILES of the molecule whose poses are currently shown in the viewers. */
   activeSmiles: string | null
   onSelect: (smiles: string) => void
+  /** The molecule currently docking, streamed step by step. null when idle. */
+  docking?: { smiles: string; progress: DockProgress | null; partial: DockPartial } | null
+}
+
+/**
+ * The in-flight dock, shown at the foot of the board.
+ *
+ * A dock is six AutoDock Vina runs plus, for a covalent ligand, a geometry pass over
+ * every seed — tens of seconds of CPU that no amount of engineering removes. So the
+ * progress line names the step rather than spinning: "mutant pocket docked, seed 2 of 3"
+ * is a wait; an unlabelled spinner for a minute is a hang.
+ *
+ * The statistics appear as they are computed, and never before. A result is streamed the
+ * moment it is real — the wild-type affinity lands while the mutant seeds are still
+ * running — but the finished LigandDock is only assembled at the end, so a field that is
+ * absent here has genuinely not been measured yet. It is not zero, and it is not
+ * pending in a buffer somewhere.
+ */
+function DockingRow({
+  smiles,
+  progress,
+  partial,
+}: {
+  smiles: string
+  progress: DockProgress | null
+  partial: DockPartial
+}) {
+  const pct = progress && progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : null
+  const hasResults =
+    partial.wt_score != null || partial.mutant_score != null || partial.covalent != null
+
+  return (
+    <li aria-live="polite">
+      <div className="flex flex-col gap-3 border-b border-hairline bg-paper-deep px-4 py-3.5 last:border-b-0">
+        <div className="flex items-start gap-3">
+          <span className="mt-0.5 flex h-5 w-5 flex-none items-center justify-center rounded-full bg-accent-soft">
+            <span className="h-2 w-2 animate-pulse rounded-full bg-accent" />
+          </span>
+          <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+            <div className="flex flex-wrap items-baseline gap-2">
+              <span className="text-xs font-medium text-accent">Docking</span>
+              <span className="text-xs text-muted">
+                {progress?.message ?? 'preparing'}
+                {progress && progress.total > 0 && ` · step ${progress.done} of ${progress.total}`}
+              </span>
+            </div>
+            <p className="break-all font-mono text-xs leading-relaxed text-muted">{smiles}</p>
+          </div>
+        </div>
+
+        <div className="ml-8 h-0.5 overflow-hidden rounded-full bg-hairline">
+          <div
+            className="h-full rounded-full bg-accent transition-[width] duration-500"
+            style={{ width: `${pct ?? 4}%` }}
+          />
+        </div>
+
+        {hasResults && (
+          <dl className="grid grid-cols-2 gap-x-8 gap-y-3 pl-8 sm:grid-cols-4">
+            {partial.wt_score != null && (
+              <Stat
+                label="Wild-type affinity"
+                value={affinity(partial.wt_score)}
+                unit="kcal/mol"
+                hint="AutoDock Vina affinity against the wild-type pocket. More negative = binds tighter."
+              />
+            )}
+            {partial.mutant_score != null && (
+              <Stat
+                label="Mutant affinity"
+                value={affinity(partial.mutant_score)}
+                unit="kcal/mol"
+                hint="AutoDock Vina affinity against the mutant pocket, median over the replicate seeds. Raw — no covalent term is folded in."
+              />
+            )}
+            {partial.selectivity != null && (
+              <Stat
+                label="Selectivity"
+                value={signed(partial.selectivity)}
+                unit="kcal/mol"
+                hint={SELECTIVITY_NOTE}
+                tone="text-muted"
+              />
+            )}
+            {partial.covalent && <CovalentStats c={partial.covalent} />}
+          </dl>
+        )}
+      </div>
+    </li>
+  )
 }
 
 /** Signed value with a true minus glyph, e.g. "+4.10" / "−0.30". */
@@ -123,7 +213,7 @@ function CovalentStats({ c }: { c: CovalentDock }) {
  * Every statistic is named and carries its unit. The SMILES is never truncated: it is
  * the molecule's identity, and an ellipsis makes two different candidates look alike.
  */
-export default function SelectivityBoard({ ranking, status, error, activeSmiles, onSelect }: Props) {
+export default function SelectivityBoard({ ranking, status, error, activeSmiles, onSelect, docking }: Props) {
   const rows = ranking?.ranked ?? []
   const covalentRun = rows.some((m) => m.scores.covalent != null)
 
@@ -158,7 +248,7 @@ export default function SelectivityBoard({ ranking, status, error, activeSmiles,
 
       {status === 'error' ? (
         <p className="text-sm text-conf-verylow">{error ?? 'Ranking failed'}</p>
-      ) : rows.length === 0 ? (
+      ) : rows.length === 0 && !docking ? (
         <div className="rounded-md border border-dashed border-hairline bg-paper px-4 py-8 text-center">
           <p className="text-sm text-muted">
             {status === 'loading' ? 'Ranking…' : 'No docks yet — dock a candidate to rank it here.'}
@@ -250,6 +340,9 @@ export default function SelectivityBoard({ ranking, status, error, activeSmiles,
                 </li>
               )
             })}
+            {docking && (
+              <DockingRow smiles={docking.smiles} progress={docking.progress} partial={docking.partial} />
+            )}
           </ul>
 
           <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-t border-hairline bg-paper-deep px-4 py-2.5 text-xs text-muted">

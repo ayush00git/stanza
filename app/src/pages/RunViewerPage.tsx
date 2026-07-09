@@ -1,15 +1,17 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
-  dockRunLigand,
   generateCandidates,
   getRun,
   getRunPockets,
   getRunRanking,
   isCovalentFeasible,
   runStructureUrl,
+  streamDockLigand,
   type Candidate,
   type CovalentDock,
+  type DockPartial,
+  type DockProgress,
   type LigandDock,
   type Ranking,
   type Run,
@@ -172,6 +174,16 @@ export default function RunViewerPage() {
   // Which molecule's poses are shown in the viewers.
   const [activeSmiles, setActiveSmiles] = useState<string | null>(null)
 
+  // The molecule currently docking, its last reported step, and the results established
+  // so far. Rendered as a live row at the foot of the leaderboard so the wait is legible
+  // rather than blank.
+  const [docking, setDocking] = useState<{
+    smiles: string
+    progress: DockProgress | null
+    partial: DockPartial
+  } | null>(null)
+  const dockStreamRef = useRef<(() => void) | null>(null)
+
   const refreshRanking = (signal?: AbortSignal) => {
     setRankingStatus('loading')
     getRunRanking(id, { signal })
@@ -202,6 +214,9 @@ export default function RunViewerPage() {
     setPockets(null)
     setPocketsStatus('loading')
     setPocketsError(null)
+    dockStreamRef.current?.()
+    dockStreamRef.current = null
+    setDocking(null)
 
     getRun(id, ctrl.signal)
       .then((r) => {
@@ -256,22 +271,34 @@ export default function RunViewerPage() {
       })
   }
 
+  // Docking streams its steps: six Vina runs plus a covalent geometry pass is tens of
+  // seconds of CPU, and a spinner that says nothing for a minute reads as a hang.
   const handleDock = (smiles: string) => {
+    dockStreamRef.current?.()
     setDockState((prev) => ({ ...prev, [smiles]: { phase: 'docking' } }))
-    dockRunLigand(id, smiles, ctrlRef.current?.signal)
-      .then((dock) => {
+    setDocking({ smiles, progress: null, partial: {} })
+
+    dockStreamRef.current = streamDockLigand(id, smiles, {
+      // Each step contributes only the fields it established, so the strip fills in
+      // rather than flickering between a value and a placeholder.
+      onProgress: (progress) =>
+        setDocking((prev) => ({
+          smiles,
+          progress,
+          partial: { ...(prev?.smiles === smiles ? prev.partial : {}), ...progress.partial },
+        })),
+      onDock: (dock) => {
         setDocks((prev) => upsertDock(prev, dock))
         setDockState((prev) => ({ ...prev, [smiles]: { phase: 'done', selectivity: dock.selectivity } }))
         setActiveSmiles(smiles)
         refreshRanking(ctrlRef.current?.signal ?? undefined)
-      })
-      .catch((e: unknown) => {
-        if (ctrlRef.current?.signal.aborted) return
-        setDockState((prev) => ({
-          ...prev,
-          [smiles]: { phase: 'error', error: e instanceof Error ? e.message : 'Docking failed' },
-        }))
-      })
+      },
+      onError: (message) => {
+        setDocking(null)
+        setDockState((prev) => ({ ...prev, [smiles]: { phase: 'error', error: message } }))
+      },
+      onDone: () => setDocking(null),
+    })
   }
 
   // Highlight the resistance pocket's residues in BOTH viewers (WT and mutant
@@ -466,6 +493,7 @@ export default function RunViewerPage() {
             error={rankingError}
             activeSmiles={activeSmiles}
             onSelect={setActiveSmiles}
+            docking={docking}
           />
         </div>
       )}
