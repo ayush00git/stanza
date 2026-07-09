@@ -97,24 +97,27 @@ export default function Hero() {
 
   return (
     <section id="top" className="mx-auto max-w-5xl px-6 pt-16 pb-20 sm:pt-24">
-      <p className="rise mb-8 inline-flex items-center gap-2.5 rounded-full border border-hairline bg-paper py-1.5 pl-3 pr-4 shadow-[0_1px_2px_rgba(18,22,28,0.03)]">
-        <span className="relative flex h-1.5 w-1.5">
-          <span className="absolute inline-flex h-full w-full rounded-full bg-accent opacity-70" />
-          <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-accent" />
-        </span>
-        <span className="font-mono text-[11px] uppercase tracking-[0.22em] text-accent">
-          Resistance-aware drug design
-        </span>
-      </p>
-
       <div className="grid gap-14 lg:grid-cols-[1.05fr_1fr] lg:items-center">
-        <div className="rise" style={{ animationDelay: '0.1s' }}>
-          <h1 className="font-display text-[2.6rem] font-normal leading-[1.08] tracking-[-0.015em] text-ink sm:text-6xl">
-            Bind the mutant.
+        <div>
+          <h1 className="rise font-display text-[2.7rem] font-normal leading-[1.06] tracking-[-0.015em] text-ink sm:text-[4.1rem]">
+            Resistance-aware
             <br />
-            Spare the wild type.
+            drug design.
           </h1>
-          <p className="mt-8 max-w-md text-lg leading-relaxed text-muted">
+
+          {/* The thesis, in the display face's italic — the one claim everything
+              downstream has to earn. */}
+          <p
+            className="rise mt-6 font-display text-[1.4rem] italic leading-snug tracking-[-0.01em] text-accent sm:text-[1.7rem]"
+            style={{ animationDelay: '0.12s' }}
+          >
+            Bind the mutant. Spare the wild type.
+          </p>
+
+          <p
+            className="rise mt-7 max-w-md text-lg leading-relaxed text-muted"
+            style={{ animationDelay: '0.2s' }}
+          >
             When a target mutates, the drug stops working. Stanza takes the
             mutation as its starting input, rebuilds the resistant pocket, and
             has Claude design molecules against it — docking every candidate
@@ -122,7 +125,10 @@ export default function Hero() {
             tell them apart.
           </p>
 
-          <div className="mt-10 flex flex-wrap items-center gap-4">
+          <div
+            className="rise mt-10 flex flex-wrap items-center gap-4"
+            style={{ animationDelay: '0.28s' }}
+          >
             <Link
               to="/runs"
               className="rounded-full bg-ink px-6 py-3 text-sm font-medium text-paper transition-transform hover:-translate-y-0.5"
@@ -141,7 +147,7 @@ export default function Hero() {
         {/* Signature: one molecule, both tracks, the margin between them. */}
         <figure
           className="rise overflow-hidden rounded-xl border border-hairline bg-paper shadow-[0_1px_0_rgba(18,22,28,0.02),0_18px_40px_-28px_rgba(18,22,28,0.35)]"
-          style={{ animationDelay: '0.25s' }}
+          style={{ animationDelay: '0.36s' }}
         >
           <figcaption className="flex items-baseline justify-between gap-4 border-b border-hairline px-6 py-4">
             <span className="font-display text-lg font-medium text-ink">
