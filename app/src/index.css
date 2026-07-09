@@ -18,6 +18,12 @@
   /* Failure states only — a run that could not acquire a structure. */
   --color-danger: #b42318;
 
+  /* Claude's terracotta, reserved for the waiting indicator: the moments the
+     model is doing the work. Sweeps toward the deep tone, so the label darkens
+     into legibility on paper rather than washing out. */
+  --color-claude: #d97757;
+  --color-claude-deep: #9c3d24;
+
   /* AlphaFold pLDDT confidence scale — used only for the confidence strip */
   --color-conf-veryhigh: #0053d6;
   --color-conf-confident: #65cbf3;
@@ -96,6 +102,47 @@
   animation: draw 0.9s var(--ease-out-quart) backwards;
 }
 
+/* A light sweeps across the label while we wait on the server. The text stays
+   legible at every point in the sweep — it darkens toward ink, never fades out. */
+@keyframes shimmer {
+  from {
+    background-position: 180% 0;
+  }
+  to {
+    background-position: -80% 0;
+  }
+}
+
+.shimmer {
+  background-image: linear-gradient(
+    100deg,
+    var(--color-claude) 40%,
+    var(--color-claude-deep) 50%,
+    var(--color-claude) 60%
+  );
+  background-size: 220% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  animation: shimmer 2.4s linear infinite;
+}
+
+/* Each dot lifts in turn, so the ellipsis reads as ongoing work. */
+@keyframes blink {
+  0%,
+  80%,
+  100% {
+    opacity: 0.25;
+  }
+  40% {
+    opacity: 1;
+  }
+}
+
+.blink {
+  animation: blink 1.4s var(--ease-out-quart) infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;
@@ -108,5 +155,14 @@
   .draw {
     animation: none;
     transform: none;
+  }
+  .shimmer {
+    animation: none;
+    background-image: none;
+    color: var(--color-claude-deep);
+  }
+  .blink {
+    animation: none;
+    opacity: 1;
   }
 }

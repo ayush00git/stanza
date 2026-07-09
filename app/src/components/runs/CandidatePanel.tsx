@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { Candidate } from '../../lib/api'
+import Thinking, { GEN_PHASES } from '../Thinking'
 
 /** Per-candidate docking phase, keyed by SMILES in the page's dockState map. */
 export type CandidatePhase = 'docking' | 'done' | 'error'
@@ -115,15 +116,23 @@ export default function CandidatePanel({
 
       {generateError && <p className="mt-3 text-sm text-conf-verylow">{generateError}</p>}
 
+      {/* Regenerating over an existing list: the list stays put, so the waiting
+          indicator has to live up here or it would not be seen at all. */}
+      {generating && candidates.length > 0 && (
+        <Thinking phases={GEN_PHASES} intervalMs={3200} className="mt-3" />
+      )}
+
       {candidates.length === 0 ? (
         <div className="mt-4 rounded-lg border border-dashed border-hairline bg-paper-deep/40 px-6 py-12 text-center">
-          <p className="text-sm text-muted">
-            {generating
-              ? 'Claude is proposing molecules…'
-              : canGenerate
+          {generating ? (
+            <Thinking phases={GEN_PHASES} intervalMs={3200} className="justify-center" />
+          ) : (
+            <p className="text-sm text-muted">
+              {canGenerate
                 ? 'Generate molecules to design against the mutant pocket'
                 : 'Run needs a mutant structure before generating'}
-          </p>
+            </p>
+          )}
         </div>
       ) : (
         <ul className="mt-4 max-h-[28rem] overflow-y-auto rounded-md border border-hairline bg-paper">

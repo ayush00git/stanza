@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import DualTrack from './DualTrack'
+import Thinking, { RUN_PHASES } from './Thinking'
 import { createRun } from '../lib/api'
 import { useActiveProfile } from '../lib/profile'
 
@@ -205,6 +206,14 @@ export default function Hero() {
                 ? 'Acquiring structure…'
                 : `Run ${TARGET.uniprot} · ${TARGET.mutation}`}
             </button>
+
+            {starting && (
+              <Thinking
+                phases={RUN_PHASES}
+                className="mt-3 justify-center"
+                showElapsed={false}
+              />
+            )}
 
             {error && (
               <p

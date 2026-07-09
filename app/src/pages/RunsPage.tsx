@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { createRun, listRuns, listRunsByProfile, type Run } from '../lib/api'
 import { useActiveProfile } from '../lib/profile'
+import Thinking, { RUN_PHASES } from '../components/Thinking'
 
 type ListStatus = 'loading' | 'done' | 'error'
 
@@ -154,11 +155,7 @@ export default function RunsPage() {
               ))}
             </div>
           </form>
-          {creating && (
-            <p className="mt-2 text-sm text-muted">
-              Acquiring the structure and building the mutant — this can take a moment.
-            </p>
-          )}
+          {creating && <Thinking phases={RUN_PHASES} className="mt-4" />}
         </section>
 
         {/* Recent runs */}
