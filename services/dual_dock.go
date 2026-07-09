@@ -28,7 +28,11 @@ func DockLigandDualTrack(ctx context.Context, run *models.Run, smiles string) (*
 		return nil, fmt.Errorf("dock: run has no resistance pocket (run Stage-3 analysis first)")
 	}
 
-	pocket := models.Pocket{Center: run.Pockets.Context.MutantPocket.Center}
+	// Volume is carried so both tracks derive the same pocket-sized docking box.
+	pocket := models.Pocket{
+		Center: run.Pockets.Context.MutantPocket.Center,
+		Volume: run.Pockets.Context.MutantPocket.Volume,
+	}
 
 	tmp, err := os.MkdirTemp("", "dualdock-")
 	if err != nil {
@@ -74,6 +78,14 @@ const (
 	screenCPU            = 2
 )
 
+// screenVinaOptions are shared by both tracks: identical box and identical seed, so
+// a WT/mutant score difference can only come from the receptor.
+var screenVinaOptions = VinaOptions{
+	Exhaustiveness: screenExhaustiveness,
+	CPU:            screenCPU,
+	Seed:           DefaultDockSeed,
+}
+
 // dockTrack docks the prepared ligand into a run's structure for one track, reusing
 // the run's cached receptor PDBQT (prepared once via ensureReceptorPDBQT), and
 // returns the Vina affinity and the docked-pose PDB.
@@ -85,7 +97,7 @@ func dockTrack(runID, track, ligandPDBQT string, pocket models.Pocket, outDir st
 	if err != nil {
 		return 0, "", fmt.Errorf("receptor prep: %w", err)
 	}
-	res, err := RunVinaDock(receptorPDBQT, ligandPDBQT, pocket, screenExhaustiveness, screenCPU, outDir)
+	res, err := RunVinaDock(receptorPDBQT, ligandPDBQT, pocket, screenVinaOptions, outDir)
 	if err != nil {
 		return 0, "", err
 	}
