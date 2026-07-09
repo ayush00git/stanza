@@ -90,6 +90,8 @@ type MutantPocket struct {
 	// SelectionMethod records why this pocket was chosen — a curated known site, or
 	// druggability-weighted proximity to the mutated residue.
 	SelectionMethod string `json:"selection_method,omitempty"`
+	// SiteName names the curated site when one was matched, e.g. "switch-II pocket".
+	SiteName string `json:"site_name,omitempty"`
 }
 
 // PocketDelta is what the mutation changed, WT -> mutant, for the resistance pocket.

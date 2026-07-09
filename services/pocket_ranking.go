@@ -175,19 +175,40 @@ func residueCenter(structPath, chain string, pos int) ([3]float64, bool) {
 	return computeCenter(coords), true
 }
 
-// selectResistancePocket returns the pocket the pipeline designs against, together
-// with the method that chose it.
-func selectResistancePocket(pockets []models.Pocket, chain string, pos int, structPath string) (*models.Pocket, string) {
+// resistanceChoice is the selected resistance pocket and the provenance of the
+// choice.
+type resistanceChoice struct {
+	Pocket   *models.Pocket
+	Method   string // SelectionKnownSite | SelectionProximity
+	SiteName string // set only for a curated site
+}
+
+// selectResistancePocket returns the pocket the pipeline designs against.
+//
+// A curated site for this protein and mutation wins outright: cryptic sites like
+// the KRAS switch-II pocket score worse than their neighbours on every generic
+// criterion, so no amount of geometric ranking will find them. Everything else
+// falls to druggability-weighted proximity to the mutated residue.
+func selectResistancePocket(pockets []models.Pocket, chain string, pos int, structPath, uniprotID string, mut models.Mutation, siteHint string) resistanceChoice {
 	if len(pockets) == 0 {
-		return nil, ""
+		return resistanceChoice{}
 	}
+
+	if site := LookupKnownSite(uniprotID, mut, siteHint); site != nil {
+		// A curated site that matches no pocket on this structure falls through to the
+		// generic ranking rather than failing the run — the site may simply be closed.
+		if p, _ := matchSitePocket(pockets, site, chain); p != nil {
+			return resistanceChoice{Pocket: p, Method: SelectionKnownSite, SiteName: site.Name}
+		}
+	}
+
 	resCenter, ok := residueCenter(structPath, chain, pos)
 	if !ok {
 		// Without the residue's coordinates the proximity term is meaningless; fall
 		// back to the most druggable pocket that lines the residue.
 		cands := pocketsContaining(pockets, chain, pos)
 		if len(cands) == 0 {
-			return nil, ""
+			return resistanceChoice{}
 		}
 		best := cands[0]
 		for _, p := range cands[1:] {
@@ -195,7 +216,10 @@ func selectResistancePocket(pockets []models.Pocket, chain string, pos int, stru
 				best = p
 			}
 		}
-		return best, SelectionProximity
+		return resistanceChoice{Pocket: best, Method: SelectionProximity}
 	}
-	return selectByProximity(pockets, chain, pos, resCenter), SelectionProximity
+	return resistanceChoice{
+		Pocket: selectByProximity(pockets, chain, pos, resCenter),
+		Method: SelectionProximity,
+	}
 }

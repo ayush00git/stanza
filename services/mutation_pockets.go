@@ -60,16 +60,16 @@ func BuildPocketAnalysis(ctx context.Context, run *models.Run) (*models.PocketAn
 	// by a single side chain, so the same pocket barely moves, and this avoids
 	// inflated deltas when fpocket partitions the residue's pocket differently
 	// between the tracks.
-	mutRP, method := selectResistancePocket(mutPockets, chain, pos, mutPath)
+	choice := selectResistancePocket(mutPockets, chain, pos, mutPath, run.UniprotID, run.Mutation, run.SiteHint)
 	var wtRP *models.Pocket
-	if mutRP != nil {
-		wtRP = nearestPocketWithin(wtPockets, mutRP.Center, resistancePairRadius)
+	if choice.Pocket != nil {
+		wtRP = nearestPocketWithin(wtPockets, choice.Pocket.Center, resistancePairRadius)
 	}
 
 	var context *models.MutantPocketContext
-	if mutRP != nil {
-		context = buildMutantContext(wtRP, mutRP, chain, pos,
-			run.Mutagenesis.WildTypeResidue, run.Mutagenesis.MutantResidue, method)
+	if choice.Pocket != nil {
+		context = buildMutantContext(wtRP, choice, chain, pos,
+			run.Mutagenesis.WildTypeResidue, run.Mutagenesis.MutantResidue)
 	}
 
 	return &models.PocketAnalysis{
@@ -129,8 +129,9 @@ func nearestPocketWithin(pockets []models.Pocket, center [3]float64, maxDist flo
 }
 
 // buildMutantContext assembles the resistance pocket + WT→mutant delta payload.
-// method records how the resistance pocket was chosen.
-func buildMutantContext(wtRP, mutRP *models.Pocket, chain string, pos int, wtName, mutName, method string) *models.MutantPocketContext {
+// choice carries the selected pocket and why it was chosen.
+func buildMutantContext(wtRP *models.Pocket, choice resistanceChoice, chain string, pos int, wtName, mutName string) *models.MutantPocketContext {
+	mutRP := choice.Pocket
 	mp := models.MutantPocket{
 		KeyResidues:     keyResidues(mutRP, chain, pos, mutName),
 		Volume:          mutRP.Volume,
@@ -138,7 +139,8 @@ func buildMutantContext(wtRP, mutRP *models.Pocket, chain string, pos int, wtNam
 		Polarity:        mutRP.Polarity,
 		Center:          mutRP.Center,
 		PocketID:        mutRP.PocketID,
-		SelectionMethod: method,
+		SelectionMethod: choice.Method,
+		SiteName:        choice.SiteName,
 	}
 
 	delta := models.PocketDelta{
