@@ -120,7 +120,7 @@ export default function CovalentBadge({
   return (
     <span
       title={covalentTitle(covalent)}
-      className={`inline-flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-[11px] font-medium leading-none ${tone} ${className}`}
+      className={`inline-flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-xs font-medium leading-none ${tone} ${className}`}
     >
       {/* hexagon glyph reads as a covalent bond */}
       <span aria-hidden="true">⬡</span>

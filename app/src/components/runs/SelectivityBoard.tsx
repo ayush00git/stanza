@@ -51,12 +51,12 @@ function Stat({
 }) {
   return (
     <div className="flex flex-col gap-0.5" title={hint}>
-      <span className="text-[10px] uppercase tracking-wide text-muted">{label}</span>
+      <span className="text-xs uppercase tracking-wide text-muted">{label}</span>
       <span className={`text-sm tabular-nums ${tone}`}>
         {value}
-        {unit && <span className="ml-1 text-[10px] font-normal text-muted">{unit}</span>}
+        {unit && <span className="ml-1 text-xs font-normal text-muted">{unit}</span>}
       </span>
-      {note && <span className="text-[10px] leading-tight text-muted/80">{note}</span>}
+      {note && <span className="text-xs leading-tight text-muted/80">{note}</span>}
     </div>
   )
 }
@@ -201,7 +201,7 @@ export default function SelectivityBoard({ ranking, status, error, activeSmiles,
                           {s.covalent && <CovalentBadge covalent={s.covalent} />}
                           {s.fitness != null && (
                             <span
-                              className="text-[10px] text-muted"
+                              className="text-xs text-muted"
                               title="Composite fitness: the pool-normalised weighted sum that produced this rank. Comparable only within this run."
                             >
                               fitness {s.fitness.toFixed(2)}
@@ -209,15 +209,13 @@ export default function SelectivityBoard({ ranking, status, error, activeSmiles,
                           )}
                         </div>
                         {/* Never truncated: the SMILES is the molecule's identity. */}
-                        <p className="break-all font-mono text-[11px] leading-relaxed text-ink select-text">
+                        <p className="break-all font-mono text-xs leading-relaxed text-ink select-text">
                           {m.smiles}
                         </p>
                       </div>
                     </div>
 
-                    {/* Two columns, not a viewport-driven breakpoint: this board lives in a
-                        narrow sidebar, where `sm:` would widen it exactly when it should not. */}
-                    <dl className="grid grid-cols-2 gap-x-6 gap-y-2.5 pl-8">
+                    <dl className="grid grid-cols-2 gap-x-8 gap-y-3 pl-8 sm:grid-cols-4">
                       <Stat
                         label="Wild-type affinity"
                         value={affinity(s.wt_score)}

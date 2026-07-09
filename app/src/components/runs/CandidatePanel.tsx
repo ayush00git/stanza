@@ -24,9 +24,6 @@ type Props = {
 const GEN_COUNTS = [4, 6, 8]
 
 /** Truncate a SMILES string for compact display. */
-function truncateSmiles(smiles: string, max = 34): string {
-  return smiles.length > max ? `${smiles.slice(0, max - 1)}…` : smiles
-}
 
 /** Signed selectivity, e.g. "+4.10" / "−0.30" (true minus glyph). */
 function signedSel(x: number): string {
@@ -139,9 +136,9 @@ export default function CandidatePanel({
                 className="flex flex-col gap-3 border-b border-hairline px-3 py-3 last:border-b-0 sm:flex-row sm:items-start sm:justify-between"
               >
                 <div className="min-w-0 flex-1">
-                  <p className="truncate font-mono text-xs text-ink" title={c.smiles}>
-                    {truncateSmiles(c.smiles)}
-                  </p>
+                  {/* Never truncated: the SMILES is the molecule's identity, and an ellipsis
+                      makes two different candidates look alike. */}
+                  <p className="break-all font-mono text-xs leading-relaxed text-ink">{c.smiles}</p>
                   <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1">
                     <Metric label="QED" value={c.qed.toFixed(2)} />
                     <Metric label="MW" value={c.mol_weight.toFixed(0)} />

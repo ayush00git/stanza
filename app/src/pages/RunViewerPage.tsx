@@ -446,29 +446,27 @@ export default function RunViewerPage() {
               </p>
             </div>
 
-            <div className="flex flex-col gap-8 lg:flex-row lg:gap-10">
-              <div className="min-w-0 flex-1">
-                <CandidatePanel
-                  candidates={candidates}
-                  generating={generating}
-                  generateError={generateError}
-                  onGenerate={handleGenerate}
-                  dockState={dockState}
-                  onDock={handleDock}
-                  canGenerate={hasStructures}
-                />
-              </div>
-              <aside className="flex-none lg:sticky lg:top-24 lg:w-80 lg:self-start">
-                <SelectivityBoard
-                  ranking={ranking}
-                  status={rankingStatus}
-                  error={rankingError}
-                  activeSmiles={activeSmiles}
-                  onSelect={setActiveSmiles}
-                />
-              </aside>
-            </div>
+            <CandidatePanel
+              candidates={candidates}
+              generating={generating}
+              generateError={generateError}
+              onGenerate={handleGenerate}
+              dockState={dockState}
+              onDock={handleDock}
+              canGenerate={hasStructures}
+            />
           </section>
+
+          {/* ── Selectivity ranking ──
+              Below the candidates rather than beside them: the leaderboard carries a full
+              SMILES and seven labelled statistics per row, none of which fit a sidebar. */}
+          <SelectivityBoard
+            ranking={ranking}
+            status={rankingStatus}
+            error={rankingError}
+            activeSmiles={activeSmiles}
+            onSelect={setActiveSmiles}
+          />
         </div>
       )}
     </div>
