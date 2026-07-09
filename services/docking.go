@@ -16,6 +16,14 @@ import (
 
 const (
     dockTimeout = 10 * 60 // seconds
+    // ligprepScript builds the ligand's 3D conformer, resolved relative to the
+    // server's working directory (the repo root, like scripts/mutate.py).
+    ligprepScript = "scripts/ligprep.py"
+    // DefaultLigandSeed fixes the ETKDG conformer search. obabel --gen3d, which this
+    // replaced, was unseeded: the same SMILES yielded a different 3D structure every
+    // invocation, so a molecule re-docked against the same receptor moved. Vina's
+    // --seed pins the search but not the ligand it searches from.
+    DefaultLigandSeed = 42
 )
 
 // DockResult holds docked ligand conformations
@@ -31,8 +39,12 @@ type DockResult struct {
 
 // SMILESTo3D generates 3D coordinates from SMILES using OpenBabel
 func SMILESTo3D(smiles string, outDir string) (string, error) {
-    outPath := filepath.Join(outDir, "ligand_3D.pdb")
-    cmd := exec.Command("obabel", "-:"+smiles, "-O", outPath, "--gen3d")
+    outPath := filepath.Join(outDir, "ligand_3D.sdf")
+    cmd := exec.Command("python3", ligprepScript,
+        "--smiles", smiles,
+        "--out", outPath,
+        "--seed", strconv.Itoa(DefaultLigandSeed),
+    )
     var stderr bytes.Buffer
     cmd.Stderr = &stderr
     if err := cmd.Run(); err != nil {
@@ -64,12 +76,15 @@ func PrepareReceptor(pdbPath, outDir string) (string, error) {
     return outPath, nil
 }
 
-// PrepareLigand converts ligand 3D PDB → PDBQT, then strips any lines that
-// Vina's ligand parser does not recognise (e.g. COMPND, AUTHOR …).
-func PrepareLigand(pdbPath, outDir string) (string, error) {
+// PrepareLigand converts the ligand's 3D structure → PDBQT, then strips any lines
+// that Vina's ligand parser does not recognise (e.g. COMPND, AUTHOR …). The input is
+// the SDF written by SMILESTo3D, whose explicit bond block spares OpenBabel from
+// re-perceiving bond orders off the coordinates — a guess it gets wrong on fused
+// heteroaromatic scaffolds.
+func PrepareLigand(ligandPath, outDir string) (string, error) {
     outPath := filepath.Join(outDir, "ligand.pdbqt")
     // Use -ph 7.4 to protonate and -xh to add hydrogens for the ligand
-    cmd := exec.Command("obabel", pdbPath, "-O", outPath, "-ph", "7.4", "-xh")
+    cmd := exec.Command("obabel", ligandPath, "-O", outPath, "-ph", "7.4", "-xh")
     var stderr bytes.Buffer
     cmd.Stderr = &stderr
     if err := cmd.Run(); err != nil {
