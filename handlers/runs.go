@@ -328,7 +328,16 @@ func DockRunStreamHandler(c *gin.Context) {
 
 	go func() {
 		defer close(events)
-		res, err := services.DockLigandDualTrackProgress(ctx, run, smiles, func(p models.DockProgress) {
+		// The dock outlives the request. Closing the EventSource — the tab, a navigation,
+		// or simply clicking Dock on another molecule, which closes this stream — must not
+		// kill the Vina processes and the covalent assessment mid-flight. It once did: an
+		// interrupted assessment was persisted as `assess_failed`, so the UI reported "not
+		// assessed" for a molecule whose chemistry was never in doubt, which is exactly the
+		// silent-failure class this pipeline has been bitten by before. Cancelling the
+		// request now cancels only the stream; the CPU is already spent either way, so the
+		// dock finishes and its result is cached on the run.
+		dockCtx := context.WithoutCancel(ctx)
+		res, err := services.DockLigandDualTrackProgress(dockCtx, run, smiles, func(p models.DockProgress) {
 			emit("progress", p)
 		})
 		if err != nil {
@@ -339,9 +348,7 @@ func DockRunStreamHandler(c *gin.Context) {
 		run.Docks = append(run.Docks, *res)
 		genMu.Unlock()
 		DefaultRunStore.Put(run)
-		// The result outlives the request: a client that navigated away still paid for the
-		// CPU, so the dock is persisted against a context the disconnect cannot cancel.
-		persistRun(context.WithoutCancel(ctx), run)
+		persistRun(dockCtx, run)
 		emit("dock", *res)
 	}()
 

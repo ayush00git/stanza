@@ -139,6 +139,15 @@ func DockLigandDualTrackProgress(ctx context.Context, run *models.Run, smiles st
 		MutantPosePDB: mutBest.posePDB,
 	}
 
+	// A cancelled dock must fail, not publish. assessCovalentGeometry treats a failed
+	// helper as a covalent verdict ("assess_failed"), which is the right answer when the
+	// chemistry genuinely could not be assessed and the wrong one when the process was
+	// simply killed. Left unguarded, a client closing its stream turned a perfectly good
+	// haloacetamide into "not assessed" — a silent failure wearing the costume of a result.
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("dock: cancelled before the covalent assessment: %w", err)
+	}
+
 	// Covalent geometry: report whether the warhead can actually attack the thiol. This
 	// is recorded BESIDE the affinity, never inside it — the covalent bond is not a Vina
 	// energy, and a constant folded into MutantScore would turn Selectivity into a
