@@ -1,4 +1,5 @@
 import type { FormEvent } from 'react'
+import { Link } from 'react-router-dom'
 import { useSearch } from '../lib/searchStore'
 import ComplexCard from './ComplexCard'
 
@@ -19,17 +20,36 @@ export default function TargetSearch() {
   return (
     <section id="search" className="border-t border-hairline">
       <div className="mx-auto max-w-5xl px-6 py-20 sm:py-24">
-        <div className="max-w-xl">
+        <div className="max-w-2xl">
           <p className="font-mono text-xs uppercase tracking-[0.2em] text-accent">
-            Live search
+            Live search · oligomerization
           </p>
           <h2 className="mt-4 font-display text-3xl font-normal leading-tight tracking-[-0.01em] text-ink sm:text-4xl">
-            Search a target. Structures stream in as we find them.
+            Search a target. Compare its monomer against its dimer.
           </h2>
-          <p className="mt-4 text-[0.95rem] leading-relaxed text-muted">
+          <p className="mt-4 max-w-xl text-[0.95rem] leading-relaxed text-muted">
             Query UniProt by gene or protein name. Each hit is enriched with its
             AlphaFold monomer and dimer confidence, then ranked by dimer pLDDT.
+            Open one to see which pockets survive oligomerization, which only
+            emerge at the interface, and how druggability shifts between the
+            two.
           </p>
+        </div>
+
+        {/* Two different questions share this app. Say which one this is, and
+            hand off to the other rather than letting people guess. */}
+        <div className="mt-8 flex flex-col gap-4 rounded-xl border border-hairline bg-paper-deep/40 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+          <p className="max-w-lg text-[0.9rem] leading-relaxed text-muted">
+            This is the <span className="text-ink">oligomerization</span> axis —
+            monomer against dimer. Resistance is a different question, and it
+            runs on its own pair of structures.
+          </p>
+          <Link
+            to="/runs"
+            className="shrink-0 whitespace-nowrap rounded-full border border-ink px-5 py-2 text-sm font-medium text-ink transition-colors hover:bg-ink hover:text-paper"
+          >
+            Run a mutation analysis
+          </Link>
         </div>
 
         <form onSubmit={onSubmit} className="mt-10 flex flex-col gap-3 sm:flex-row">
