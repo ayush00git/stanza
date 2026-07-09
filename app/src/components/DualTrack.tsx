@@ -1,6 +1,5 @@
 type Track = {
   label: string
-  caption: string
   score: number
   tone: 'wt' | 'mutant'
 }
@@ -19,10 +18,10 @@ const toneStyles: Record<Track['tone'], { bar: string; text: string }> = {
 }
 
 /**
- * The signature block: one molecule's paired Vina affinities, drawn as opposing
- * bars against a shared axis. Vina scores are negative kcal/mol, so a longer bar
- * is tighter binding — the mutant track should outrun the wild-type track, and
- * the gap between the two bar ends *is* the selectivity margin. Everything the
+ * The signature block: one molecule's paired Vina affinities, drawn as bars
+ * against a shared axis. Vina scores are negative kcal/mol, so a longer bar is
+ * tighter binding — the mutant track should outrun the wild-type track, and the
+ * gap between the two bar ends *is* the selectivity margin. Everything the
  * pipeline does is in service of opening that gap.
  */
 export default function DualTrack({
@@ -35,39 +34,29 @@ export default function DualTrack({
   const pct = (score: number) => Math.min(100, (score / floor) * 100)
 
   const tracks: Track[] = [
-    {
-      label: 'Mutant',
-      caption: 'the pocket we want to hit',
-      score: mutant,
-      tone: 'mutant',
-    },
-    {
-      label: 'Wild type',
-      caption: 'the pocket we want to miss',
-      score: wt,
-      tone: 'wt',
-    },
+    { label: 'Mutant', score: mutant, tone: 'mutant' },
+    { label: 'Wild type', score: wt, tone: 'wt' },
   ]
 
   return (
     <div className={className}>
-      <div className="space-y-5">
+      <div className="space-y-3">
         {tracks.map((track, i) => (
           <div key={track.label}>
             <div className="flex items-baseline justify-between">
               <span
-                className={`font-mono text-[11px] uppercase tracking-[0.15em] ${toneStyles[track.tone].text}`}
+                className={`font-mono text-[10px] uppercase tracking-[0.15em] ${toneStyles[track.tone].text}`}
               >
                 {track.label}
               </span>
               <span
-                className={`font-mono text-sm tabular-nums ${toneStyles[track.tone].text}`}
+                className={`font-mono text-[0.8rem] tabular-nums ${toneStyles[track.tone].text}`}
               >
                 {track.score.toFixed(1)}
               </span>
             </div>
 
-            <div className="mt-2 h-1.5 w-full rounded-full bg-paper-deep">
+            <div className="mt-1.5 h-1.5 w-full rounded-full bg-paper-deep">
               <div
                 className={`draw h-full rounded-full ${toneStyles[track.tone].bar}`}
                 style={{
@@ -76,29 +65,25 @@ export default function DualTrack({
                 }}
               />
             </div>
-
-            <p className="mt-1.5 text-[11px] leading-none text-muted">
-              {track.caption}
-            </p>
           </div>
         ))}
       </div>
 
       {/* The gap, named. */}
-      <div className="mt-6 flex items-center justify-between rounded-lg bg-[var(--color-gain-soft)] px-4 py-3">
-        <span className="font-mono text-[11px] uppercase tracking-[0.15em] text-[var(--color-gain)]">
+      <div className="mt-4 flex items-center justify-between rounded-lg bg-[var(--color-gain-soft)] px-3.5 py-2.5">
+        <span className="font-mono text-[10px] uppercase tracking-[0.15em] text-[var(--color-gain)]">
           Selectivity margin
         </span>
-        <span className="font-mono text-sm tabular-nums text-[var(--color-gain)]">
+        <span className="font-mono text-[0.8rem] tabular-nums text-[var(--color-gain)]">
           +{margin.toFixed(1)} kcal/mol
         </span>
       </div>
 
-      <p className="mt-3 text-[0.8rem] leading-relaxed text-muted">
-        <span className="font-mono text-[11px] text-muted">
+      <p className="mt-2.5 text-[0.75rem] leading-relaxed text-muted">
+        <span className="font-mono text-[10px] text-muted">
           wt_score − mutant_score
         </span>{' '}
-        — higher is more mutant-selective.
+        — binds the mutant, spares the wild type.
       </p>
     </div>
   )

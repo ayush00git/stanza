@@ -15,6 +15,9 @@
   --color-gain: #0f766e;
   --color-gain-soft: #e3f3f1;
 
+  /* Failure states only — a run that could not acquire a structure. */
+  --color-danger: #b42318;
+
   /* AlphaFold pLDDT confidence scale — used only for the confidence strip */
   --color-conf-veryhigh: #0053d6;
   --color-conf-confident: #65cbf3;

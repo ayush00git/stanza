@@ -1,43 +1,50 @@
-import { Link } from 'react-router-dom'
+import { useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
 import DualTrack from './DualTrack'
+import { createRun } from '../lib/api'
+import { useActiveProfile } from '../lib/profile'
+
+// The target the card launches. These are the run's real inputs, not decoration:
+// the button below posts exactly this to POST /runs.
+const TARGET = {
+  uniprot: 'P01116',
+  mutation: 'G12C',
+  siteHint: 'switch-II',
+}
 
 // KRAS residues 5–20. Position 12 is the glycine that mutates to cysteine in
-// G12C — the most common oncogenic KRAS substitution, and the one sotorasib and
-// adagrasib were built against.
+// G12C — the substitution sotorasib and adagrasib were built against.
 const fragment = 'KLVVVGAGGVGKSALT'
 const startResidue = 5
 const mutatedResidue = 12
 
-const readout = [
+// Curated facts for this site, mirroring services/known_sites.go.
+const spec = [
   { label: 'UniProt', value: 'P01116' },
-  { label: 'Mutation', value: 'G12C' },
+  { label: 'Organism', value: 'H. sapiens' },
+  { label: 'Length', value: '189 aa' },
   { label: 'Site', value: 'Switch-II' },
+  { label: 'Template', value: 'PDB 6OIM' },
   { label: 'Warhead', value: 'Acrylamide' },
 ]
 
-/** The mutation, set in the sequence where it actually happens. */
+/** The mutation, set in the sequence where it actually happens. Two rows: the
+ *  residues, and the ticks. The substituted residue carries the accent. */
 function MutationStrip() {
   return (
-    <div className="flex flex-wrap gap-y-3">
+    <div className="flex flex-wrap">
       {fragment.split('').map((aa, i) => {
         const pos = startResidue + i
         const mutated = pos === mutatedResidue
         return (
-          <div key={i} className="flex w-[1.35rem] flex-col items-center">
+          <div key={i} className="flex w-[1.3rem] flex-col items-center">
             <span
               className={`font-mono text-sm leading-none ${
                 mutated
-                  ? 'text-muted line-through decoration-hairline'
-                  : 'text-ink'
+                  ? 'rounded-sm bg-accent-soft px-1 py-0.5 font-medium text-accent'
+                  : 'py-0.5 text-ink'
               }`}
-            >
-              {aa}
-            </span>
-            <span
-              className={`mt-1.5 font-mono text-sm leading-none ${
-                mutated ? 'text-accent' : 'text-transparent'
-              }`}
-              aria-hidden={!mutated}
+              title={mutated ? 'Gly12 → Cys12' : undefined}
             >
               {mutated ? 'C' : aa}
             </span>
@@ -56,15 +63,53 @@ function MutationStrip() {
 }
 
 export default function Hero() {
+  const navigate = useNavigate()
+  const profile = useActiveProfile()
+  const [starting, setStarting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  // Stage 1–2 (structure acquisition + mutagenesis) run synchronously server-side,
+  // so this takes a few seconds before the viewer has anything to show.
+  const start = () => {
+    if (starting) return
+    setStarting(true)
+    setError(null)
+    createRun({
+      uniprot_id: TARGET.uniprot,
+      mutation: TARGET.mutation,
+      site_hint: TARGET.siteHint,
+      profile_id: profile?.id,
+    })
+      .then((run) => {
+        // Acquisition can fail while still returning a run; don't open an empty viewer.
+        if (run.status === 'error') {
+          setError(run.error || 'Could not acquire a structure for this target.')
+          setStarting(false)
+          return
+        }
+        navigate(`/runs/${run.id}`)
+      })
+      .catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : 'Could not start the run.')
+        setStarting(false)
+      })
+  }
+
   return (
     <section id="top" className="mx-auto max-w-5xl px-6 pt-16 pb-20 sm:pt-24">
-      <p className="rise mb-8 font-mono text-xs uppercase tracking-[0.25em] text-accent">
-        Resistance-aware drug design
+      <p className="rise mb-8 inline-flex items-center gap-2.5 rounded-full border border-hairline bg-paper py-1.5 pl-3 pr-4 shadow-[0_1px_2px_rgba(18,22,28,0.03)]">
+        <span className="relative flex h-1.5 w-1.5">
+          <span className="absolute inline-flex h-full w-full rounded-full bg-accent opacity-70" />
+          <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-accent" />
+        </span>
+        <span className="font-mono text-[11px] uppercase tracking-[0.22em] text-accent">
+          Resistance-aware drug design
+        </span>
       </p>
 
       <div className="grid gap-14 lg:grid-cols-[1.05fr_1fr] lg:items-center">
         <div className="rise" style={{ animationDelay: '0.1s' }}>
-          <h1 className="font-display text-[2.6rem] font-normal leading-[1.08] tracking-[-0.02em] text-ink sm:text-6xl">
+          <h1 className="font-display text-[2.6rem] font-normal leading-[1.08] tracking-[-0.015em] text-ink sm:text-6xl">
             Bind the mutant.
             <br />
             Spare the wild type.
@@ -95,36 +140,72 @@ export default function Hero() {
 
         {/* Signature: one molecule, both tracks, the margin between them. */}
         <figure
-          className="rise rounded-xl border border-hairline bg-paper p-6 shadow-[0_1px_0_rgba(18,22,28,0.02),0_18px_40px_-28px_rgba(18,22,28,0.35)]"
+          className="rise overflow-hidden rounded-xl border border-hairline bg-paper shadow-[0_1px_0_rgba(18,22,28,0.02),0_18px_40px_-28px_rgba(18,22,28,0.35)]"
           style={{ animationDelay: '0.25s' }}
         >
-          <figcaption className="flex items-baseline justify-between border-b border-hairline pb-4">
+          <figcaption className="flex items-baseline justify-between gap-4 border-b border-hairline px-6 py-4">
             <span className="font-display text-lg font-medium text-ink">
               KRAS <span className="text-accent">G12C</span>
             </span>
-            <span className="font-mono text-xs uppercase tracking-[0.15em] text-accent">
-              Run
+            <span className="whitespace-nowrap font-mono text-[10px] uppercase tracking-[0.15em] text-muted">
+              Example run
             </span>
           </figcaption>
 
-          <dl className="mt-4 grid grid-cols-4 gap-2">
-            {readout.map((item) => (
-              <div key={item.label}>
-                <dt className="font-mono text-[10px] uppercase tracking-[0.1em] text-muted">
-                  {item.label}
-                </dt>
-                <dd className="mt-1 font-mono text-sm text-ink">{item.value}</dd>
-              </div>
-            ))}
-          </dl>
+          <div className="border-b border-hairline px-6 py-4">
+            <dl className="grid grid-cols-3 gap-x-4 gap-y-3">
+              {spec.map((item) => (
+                <div key={item.label}>
+                  <dt className="font-mono text-[10px] uppercase tracking-[0.1em] text-muted">
+                    {item.label}
+                  </dt>
+                  <dd className="mt-0.5 font-mono text-[0.8rem] text-ink">
+                    {item.value}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </div>
 
-          <p className="mt-6 mb-3 font-mono text-[11px] uppercase tracking-[0.15em] text-muted">
-            Glycine 12 → cysteine
-          </p>
-          <MutationStrip />
+          <div className="border-b border-hairline px-6 py-4">
+            <MutationStrip />
+          </div>
 
-          <div className="mt-7 border-t border-hairline pt-6">
+          <div className="px-6 py-4">
             <DualTrack wt={-6.8} mutant={-9.4} />
+          </div>
+
+          {/* The covalent bond docking cannot score, and the geometry that earns it. */}
+          <div className="flex items-baseline justify-between gap-4 border-t border-hairline px-6 py-3">
+            <span className="font-mono text-[10px] uppercase tracking-[0.15em] text-muted">
+              Covalent
+            </span>
+            <span className="text-right text-[0.75rem] text-muted">
+              Warhead <span className="font-mono tabular-nums text-ink">4.5 Å</span>{' '}
+              from the Cys12 thiol
+            </span>
+          </div>
+
+          <div className="border-t border-hairline bg-paper-deep/40 px-6 py-4">
+            <button
+              type="button"
+              onClick={start}
+              disabled={starting}
+              className="w-full rounded-full bg-ink px-5 py-2.5 text-sm font-medium text-paper transition-colors hover:bg-accent disabled:cursor-wait disabled:opacity-70"
+            >
+              {starting
+                ? 'Acquiring structure…'
+                : `Run ${TARGET.uniprot} · ${TARGET.mutation}`}
+            </button>
+
+            {error && (
+              <p
+                role="alert"
+                className="mt-2.5 text-[0.75rem] leading-relaxed text-[var(--color-danger)]"
+              >
+                {error}
+              </p>
+            )}
           </div>
         </figure>
       </div>
