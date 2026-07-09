@@ -88,40 +88,93 @@ func DockLigandDualTrack(ctx context.Context, run *models.Run, smiles string) (*
 	return dock, nil
 }
 
-// applyCovalent runs the covalent assessment on the mutant docked pose and, when the
-// warhead reaches the thiol, returns the covalent-adjusted mutant score and the
-// CovalentDock record. Returns (mutScore, nil) when no covalent credit applies —
-// non-covalent molecule, warhead out of reach, or the helper failing (in which case
-// the dock degrades gracefully to non-covalent rather than erroring the run).
+// applyCovalent runs the covalent assessment on the mutant docked pose and returns
+// the (possibly credited) mutant score together with the CovalentDock record.
+//
+// It returns a record for EVERY warhead-bearing molecule, credited or not, so that
+// "the warhead cannot reach the thiol" and "the measurement failed" stay visible
+// instead of degrading into the same silent non-covalent result. Only a molecule
+// with no warhead at all yields (mutScore, nil). The dock never errors on a covalent
+// failure: a run that cannot model the bond still has a valid non-covalent score.
 func applyCovalent(ctx context.Context, run *models.Run, smiles string, mutScore float64, mutPDBQT, outDir string) (float64, *covalentResult) {
+	params := DefaultCovalentParams()
+	target := resToken(run.Mutagenesis.MutantResidue, run.Mutagenesis.TargetResidueNum)
+	record := func(status, warhead, note string) *covalentResult {
+		return &covalentResult{CovalentDock: models.CovalentDock{
+			TargetResidue:    target,
+			WarheadType:      warhead,
+			Status:           status,
+			NonCovalentScore: round2(mutScore),
+			Note:             note,
+		}}
+	}
+
 	tetherOut := filepath.Join(outDir, "tether.pdb")
 	a, err := assessCovalent(ctx, smiles, mutPDBQT,
 		RunStructurePath(run.ID, "mutant"),
-		run.Mutagenesis.TargetChain, run.Mutagenesis.TargetResidueNum, tetherOut)
-	if err != nil || !a.HasWarhead || a.ReachDistance == nil {
+		run.Mutagenesis.TargetChain, run.Mutagenesis.TargetResidueNum,
+		tetherOut, params.ReachMax)
+	if err != nil {
+		return mutScore, record(models.CovalentAssessFailed, "", truncate(err.Error(), 200))
+	}
+	if !a.HasWarhead {
 		return mutScore, nil
 	}
-	credit := covalentCredit(*a.ReachDistance, DefaultCovalentParams())
+	switch a.Status {
+	case assessNoThiol:
+		return mutScore, record(models.CovalentNoThiol, a.WarheadType, "")
+	case assessUnreadable:
+		return mutScore, record(models.CovalentUnreadable, a.WarheadType,
+			fmt.Sprintf("no warhead atom located across %d docked modes", a.ModesRead))
+	case assessMeasured:
+		// fall through
+	default:
+		return mutScore, record(models.CovalentAssessFailed, a.WarheadType,
+			fmt.Sprintf("unexpected assessment status %q", a.Status))
+	}
+	if a.ReachDistance == nil {
+		return mutScore, record(models.CovalentAssessFailed, a.WarheadType, "measured status carried no reach distance")
+	}
+
+	reach := *a.ReachDistance
+	credit := covalentCredit(reach, params)
 	if credit <= 0 {
-		return mutScore, nil
+		out := record(models.CovalentOutOfReach, a.WarheadType, "")
+		out.ReachDistance = round2(reach)
+		return mutScore, out
 	}
+
 	adjusted := mutScore - credit
 	cov := &covalentResult{
 		CovalentDock: models.CovalentDock{
-			TargetResidue:    resToken(run.Mutagenesis.MutantResidue, run.Mutagenesis.TargetResidueNum),
+			TargetResidue:    target,
 			WarheadType:      a.WarheadType,
-			ReachDistance:    round2(*a.ReachDistance),
+			Status:           models.CovalentInReach,
+			ReachDistance:    round2(reach),
 			Credit:           round2(credit),
 			NonCovalentScore: round2(mutScore),
-			BondDistance:     round2(a.BondDistance),
+			Note:             truncate(a.TetherError, 200),
 		},
 	}
+	// The tethered pose only supersedes the docked pose when the helper actually
+	// closed the S–C bond without driving the ligand into the receptor.
 	if a.TetherWritten {
 		if b, e := os.ReadFile(tetherOut); e == nil {
 			cov.posePDB = string(b)
+			cov.Status = models.CovalentTethered
+			cov.BondDistance = round2(a.BondDistance)
+			cov.Note = ""
 		}
 	}
 	return adjusted, cov
+}
+
+// truncate bounds a note so a runaway helper message cannot bloat the stored record.
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n]
 }
 
 // covalentResult carries the persisted CovalentDock plus the tethered pose PDB,

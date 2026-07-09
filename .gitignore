@@ -14,3 +14,7 @@
 
 .env
 
+
+# Python bytecode from the RDKit/PDBFixer helper scripts
+__pycache__/
+*.pyc

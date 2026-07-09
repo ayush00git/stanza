@@ -69,13 +69,29 @@ func isCovalentTarget(residue3 string) bool {
 	return strings.EqualFold(strings.TrimSpace(residue3), "CYS")
 }
 
+// Statuses emitted by scripts/covalent.py `assess`. They exist so that "the ligand
+// has no warhead", "the warhead is too far to bond" and "the pose could not be read"
+// stay distinguishable: collapsing them into one silent nil is how a broken
+// measurement passes itself off as a negative result.
+// (a ligand with no warhead is reported via HasWarhead rather than a status)
+const (
+	assessNoThiol    = "no_thiol"
+	assessUnreadable = "unreadable_pose"
+	assessMeasured   = "measured"
+)
+
 // covalentAssessment mirrors the JSON emitted by scripts/covalent.py `assess`.
 type covalentAssessment struct {
 	HasWarhead    bool     `json:"has_warhead"`
 	WarheadType   string   `json:"warhead_type"`
-	ReachDistance *float64 `json:"reach_distance"` // nil when no mode could be matched
-	BondDistance  float64  `json:"bond_distance"`  // S–C of the emitted tether pose
+	Status        string   `json:"status"`
+	ReachDistance *float64 `json:"reach_distance"` // nil unless Status == assessMeasured
+	ModesRead     int      `json:"modes_read"`
+	BondDistance  float64  `json:"bond_distance"` // S–C of the emitted tether pose
+	TetherRMSD    float64  `json:"tether_rmsd"`   // heavy-atom drift from the docked pose
+	MinContact    float64  `json:"min_contact"`   // closest tethered-ligand → receptor contact
 	TetherWritten bool     `json:"tether_written"`
+	TetherError   string   `json:"tether_error"`
 	Error         string   `json:"error"`
 }
 
@@ -98,9 +114,11 @@ func HasCovalentWarhead(ctx context.Context, smiles string) (bool, string, error
 }
 
 // assessCovalent runs scripts/covalent.py `assess`: it scans the mutant docked pose
-// for the mode whose warhead reactive carbon comes closest to the cysteine SG, and
-// (when tetherOut is set) writes the tethered covalent-complex pose there.
-func assessCovalent(ctx context.Context, smiles, posePDBQT, receptorPDB, chain string, resnum int, tetherOut string) (*covalentAssessment, error) {
+// for the mode whose warhead electrophilic carbon comes closest to the cysteine SG,
+// and (when tetherOut is set) writes the tethered covalent-complex pose there.
+// tetherMaxReach skips the tether for a warhead too far away to bond, since forcing
+// the bond onto such a pose only yields a distorted structure.
+func assessCovalent(ctx context.Context, smiles, posePDBQT, receptorPDB, chain string, resnum int, tetherOut string, tetherMaxReach float64) (*covalentAssessment, error) {
 	args := []string{covalentScript, "assess",
 		"--smiles", smiles,
 		"--pose", posePDBQT,
@@ -109,7 +127,8 @@ func assessCovalent(ctx context.Context, smiles, posePDBQT, receptorPDB, chain s
 		"--resnum", strconv.Itoa(resnum),
 	}
 	if tetherOut != "" {
-		args = append(args, "--tether-out", tetherOut)
+		args = append(args, "--tether-out", tetherOut,
+			"--tether-max-reach", strconv.FormatFloat(tetherMaxReach, 'f', 3, 64))
 	}
 	cmd := exec.CommandContext(ctx, "python3", args...)
 	out, err := cmd.Output()

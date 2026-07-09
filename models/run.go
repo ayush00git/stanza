@@ -73,24 +73,44 @@ type LigandDock struct {
 	Selectivity float64 `json:"selectivity"`  // wt_score - mutant_score; large positive spares WT
 	WTPosePDB   string  `json:"wt_pose_pdb,omitempty"`
 	MutantPosePDB string `json:"mutant_pose_pdb,omitempty"`
-	// Covalent is set when the mutant track modelled a covalent tether to the mutated
-	// cysteine; MutantScore then includes the covalent credit and MutantPosePDB is the
-	// tethered complex. nil for non-covalent molecules or non-cysteine targets.
+	// Covalent is set whenever a warhead-bearing molecule is docked against a mutated
+	// cysteine, whatever the outcome — see CovalentStatus. MutantScore includes the
+	// covalent credit only when Credit > 0, and MutantPosePDB is the tethered complex
+	// only when Status is CovalentTethered. nil for non-covalent molecules and
+	// non-cysteine targets.
 	Covalent *CovalentDock `json:"covalent,omitempty"`
 }
+
+// Covalent assessment outcomes. A warhead that cannot reach the thiol and a warhead
+// whose measurement failed are different facts, and both differ from a molecule that
+// simply carries no warhead — reporting all three as "not covalent" is what let a
+// broken reach measurement look like an honest negative.
+const (
+	CovalentTethered     = "tethered"        // credit applied; a valid tethered pose was built
+	CovalentInReach      = "in_reach"        // credit applied; the tether pose was rejected
+	CovalentOutOfReach   = "out_of_reach"    // warhead present but too far from the thiol to bond
+	CovalentUnreadable   = "unreadable_pose" // no docked mode could be mapped onto the ligand
+	CovalentAssessFailed = "assess_failed"   // the assessment itself errored
+	CovalentNoThiol      = "no_thiol"        // the target residue carries no SG
+)
 
 // CovalentDock records the covalent-tether model applied to the mutant track. Vina
 // scores non-covalently, so the WT/mutant selectivity of a covalent warhead is
 // invisible to it; this captures the geometry that recovers it — whether the
 // warhead reaches the cysteine thiol — and the credit that models the bond only the
 // mutant can form.
+//
+// The credit magnitude is a model parameter, not a Vina energy. What is physically
+// measured is ReachDistance: whether the warhead can reach the thiol at all.
 type CovalentDock struct {
-	TargetResidue    string  `json:"target_residue"`     // e.g. "Cys12"
-	WarheadType      string  `json:"warhead_type"`       // e.g. "acrylamide"
-	ReachDistance    float64 `json:"reach_distance"`     // best warhead-C → thiol-SG across modes (Å)
-	Credit           float64 `json:"credit"`             // covalent credit applied to the mutant score (kcal/mol)
-	NonCovalentScore float64 `json:"non_covalent_score"` // raw Vina mutant affinity before the credit
-	BondDistance     float64 `json:"bond_distance,omitempty"` // S–C of the emitted tether pose (Å)
+	TargetResidue    string  `json:"target_residue"`           // e.g. "Cys12"
+	WarheadType      string  `json:"warhead_type,omitempty"`   // e.g. "acrylamide"
+	Status           string  `json:"status"`                   // one of the Covalent* constants
+	ReachDistance    float64 `json:"reach_distance,omitempty"` // best warhead-C → thiol-SG across modes (Å)
+	Credit           float64 `json:"credit"`                   // covalent credit applied to the mutant score (kcal/mol)
+	NonCovalentScore float64 `json:"non_covalent_score"`       // raw Vina mutant affinity before the credit
+	BondDistance     float64 `json:"bond_distance,omitempty"`  // S–C of the emitted tether pose (Å)
+	Note             string  `json:"note,omitempty"`           // why a tether or an assessment failed
 }
 
 // Candidate is a Stage-6 molecule proposed by Claude that passed the Stage-5 RDKit
