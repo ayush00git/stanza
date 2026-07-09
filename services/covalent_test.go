@@ -150,29 +150,49 @@ func TestSeedStraddlingFeasibilityIsUncertain(t *testing.T) {
 	}
 }
 
-// The replicate seeds must admit an unambiguous median and a real spread, and the
-// single-seed tracks must start from a seed the replicates also use — otherwise a
-// WT/mutant affinity difference could come from the search rather than the receptor.
-func TestCovalentSeedsAreOddDistinctAndShareTheSingleSeed(t *testing.T) {
-	if len(covalentSeeds) < 3 {
-		t.Fatalf("only %d replicate seeds; the feasibility spread cannot be estimated", len(covalentSeeds))
+// Both tracks must be replicated over the same odd, distinct seed list. Odd so the
+// median is unambiguous; at least three so a single outlying seed is outvoted; shared so
+// a WT/mutant affinity difference can only come from the receptor and not from the search.
+//
+// A single-seed track is not safe, even for an affinity. Vina's search occasionally lands
+// in a bad local minimum, per (molecule, receptor, seed). Measured on
+// C=C(F)C(=O)N1CCN(c2nc(-c3cccc4c(O)cccc34)nc3c2ncn3C)CC1: seed 42 scored the wild-type
+// pocket at −8.75 kcal/mol where four other seeds agreed on −9.8, and the mutant's seed
+// 1337 scored −7.84 against a −9.86 consensus. The mutant's median discarded its outlier;
+// the wild type, then docked once, reported its own as fact — and the run published a
+// +1.03 kcal/mol selectivity for a molecule whose median-of-three margin is +0.09.
+func TestScreenSeedsAreOddDistinctAndSharedByBothTracks(t *testing.T) {
+	if len(screenSeeds) < 3 {
+		t.Fatalf("only %d replicate seeds; one bad local minimum cannot be outvoted", len(screenSeeds))
 	}
-	if len(covalentSeeds)%2 == 0 {
-		t.Errorf("%d seeds: an even count makes the median ambiguous", len(covalentSeeds))
+	if len(screenSeeds)%2 == 0 {
+		t.Errorf("%d seeds: an even count makes the median ambiguous", len(screenSeeds))
 	}
 	seen := map[int]bool{}
-	for _, s := range covalentSeeds {
+	for _, s := range screenSeeds {
 		if seen[s] {
 			t.Errorf("duplicate replicate seed %d", s)
 		}
 		seen[s] = true
 	}
-	if len(singleSeed) != 1 {
-		t.Fatalf("singleSeed carries %d seeds, want exactly 1", len(singleSeed))
+}
+
+// The median must reject a single outlying seed. This is the exact wild-type sample that
+// produced the phantom +1.03 selectivity: four seeds agreeing near −9.8, and seed 42 a
+// full kcal/mol shallower.
+func TestMedianRejectsASingleOutlyingSeed(t *testing.T) {
+	wt := []replicate{
+		{seed: 42, affinity: -8.75}, // the outlier a single-seed track would have reported
+		{seed: 1337, affinity: -9.80},
+		{seed: 7, affinity: -9.77},
 	}
-	if singleSeed[0] != covalentSeeds[0] {
-		t.Errorf("singleSeed %d is not the replicates' first seed %d: the WT track and the "+
-			"mutant replicates would no longer share a search", singleSeed[0], covalentSeeds[0])
+	got := medianReplicate(wt).affinity
+	if got != -9.77 {
+		t.Errorf("median affinity = %v, want -9.77 (the outlier -8.75 must not be reported)", got)
+	}
+	// Selectivity against the mutant's own median (-9.86) is then +0.09, not +1.03.
+	if sel := round2(got - (-9.86)); sel != 0.09 {
+		t.Errorf("selectivity = %v, want 0.09", sel)
 	}
 }
 

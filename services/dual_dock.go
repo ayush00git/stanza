@@ -76,20 +76,17 @@ func DockLigandDualTrackProgress(ctx context.Context, run *models.Run, smiles st
 	}
 	defer os.RemoveAll(tmp)
 
-	// Replicate seeds exist solely to stabilise the covalent geometry, so only a molecule
-	// that can actually bond the target earns them. A SMILES substructure check settles
-	// that in ~0.2s, before any docking: no warhead means nothing to reach the thiol
-	// with, and no reason to dock the mutant five times.
+	// The covalent geometry assessment is the expensive Python pass, so it runs only for a
+	// ligand that can actually bond the target — a SMILES substructure check settles that
+	// in ~0.2s, before any docking. The docking replicates, however, are unconditional:
+	// they guard the affinity against Vina's occasional bad local minimum, which afflicts
+	// a non-covalent molecule exactly as much.
 	covalent := isCovalentTarget(run.Mutagenesis.MutantResidue) && ligandHasWarhead(ctx, smiles)
-	mutSeeds := singleSeed
-	if covalent {
-		mutSeeds = covalentSeeds
-	}
 
 	// ligand prep + WT dock + one step per mutant seed + the mutant score, plus the
 	// covalent assessment. The scoring step is instant; it exists so the stream can hand
 	// over the mutant affinity and the selectivity the moment they are real.
-	total := 3 + len(mutSeeds)
+	total := 3 + len(screenSeeds)
 	if covalent {
 		total++
 	}
@@ -106,23 +103,23 @@ func DockLigandDualTrackProgress(ctx context.Context, run *models.Run, smiles st
 	}
 	step("ligand", "3D conformer prepared", nil)
 
-	// The tracks share the ligand, the box and the first seed, so a WT/mutant affinity
-	// difference can still only come from the receptor. Only the mutant track is ever
-	// replicated: it is the one carrying the noisy covalent geometry.
-	wt, err := dockTrack(run.ID, "wt", ligPDBQT, pocket, filepath.Join(tmp, "wt"), singleSeed, nil)
+	// Both tracks share the ligand, the box and the seed list, so a WT/mutant affinity
+	// difference can only come from the receptor — and each is a median, so neither can be
+	// set by a single seed that landed in a bad local minimum.
+	wt, err := dockTrack(run.ID, "wt", ligPDBQT, pocket, filepath.Join(tmp, "wt"), screenSeeds, nil)
 	if err != nil {
 		return nil, fmt.Errorf("dock: WT track: %w", err)
 	}
 	wtBest := medianReplicate(wt)
 	wtScore := round2(wtBest.affinity)
-	step("wt", fmt.Sprintf("wild-type affinity %.2f kcal/mol", wtScore),
+	step("wt", fmt.Sprintf("wild-type affinity %.2f kcal/mol (median of %d seeds)", wtScore, len(wt)),
 		&models.DockPartial{WTScore: &wtScore})
 
 	mutDir := filepath.Join(tmp, "mutant")
 	var seedsDone atomic.Int32
-	mut, err := dockTrack(run.ID, "mutant", ligPDBQT, pocket, mutDir, mutSeeds, func() {
+	mut, err := dockTrack(run.ID, "mutant", ligPDBQT, pocket, mutDir, screenSeeds, func() {
 		n := seedsDone.Add(1)
-		step("mutant", fmt.Sprintf("mutant pocket docked, seed %d of %d", n, len(mutSeeds)), nil)
+		step("mutant", fmt.Sprintf("mutant pocket docked, seed %d of %d", n, len(screenSeeds)), nil)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("dock: mutant track: %w", err)
@@ -383,34 +380,32 @@ const (
 // the thiol.
 const screenNumModes = 20
 
-// covalentSeeds are the replicate seeds the MUTANT track is docked under when — and
-// only when — the ligand can actually form a covalent bond.
+// screenSeeds are the replicate seeds BOTH tracks are docked under.
 //
-// Vina's affinity is reproducible across seeds (sd ~0.03 kcal/mol) but the covalent
-// GEOMETRY is not: with the ligand conformer held fixed, the warhead's closest approach
-// to the thiol varied by ±0.16–1.09 Å over five seeds, and on one molecule the covalent
-// call flipped outright depending on nothing but the RNG. Feasibility is a function of
-// that geometry, so a single-seed answer is a coin toss reported to two decimals.
-// Replicating lets us take the median and, more importantly, flag the molecules whose
-// call is not stable.
+// Two separate quantities need them.
 //
-// Three seeds rather than five: an odd count keeps the median unambiguous, and three
-// still yields a spread and detects a call that straddles zero. It is a coarser estimate
-// of the spread, not an absent one.
-var covalentSeeds = []int{42, 1337, 7}
-
-// singleSeed docks a track once, under the same first seed the replicates start from.
+// The covalent GEOMETRY is noisy: with the ligand conformer held fixed, the warhead's
+// closest approach to the thiol varied by ±0.16–1.09 Å over five seeds, and on one
+// molecule the covalent call flipped outright on nothing but the RNG. Feasibility is a
+// function of that geometry, so a single-seed answer is a coin toss reported to two
+// decimals.
 //
-// It is used for the wild-type track always, and for the mutant track whenever the
-// ligand carries no warhead. In both cases the dock contributes only an affinity, and
-// affinity is the reproducible quantity — extra seeds re-measure the same number to
-// within 0.05 kcal/mol. Nothing there feeds the covalent geometry: the WT's Gly12 has no
-// thiol to reach, and a molecule with no warhead has nothing to reach with.
+// The AFFINITY is noisy too, which cost us a wrong answer. Vina's affinity is *usually*
+// reproducible — sd ~0.03 kcal/mol on the molecules first measured — so the wild-type
+// track was once docked under a single seed on the argument that extra seeds re-measure
+// the same number. They do not. Vina's search occasionally settles in a bad local
+// minimum, and it does so per (molecule, receptor, seed): on
+// C=C(F)C(=O)N1CCN(c2nc(-c3cccc4c(O)cccc34)nc3c2ncn3C)CC1 seed 42 scored the wild-type
+// pocket at −8.75 where four other seeds agreed on −9.8, while the mutant track's seed
+// 1337 scored −7.84 against a −9.86 consensus. The mutant survived because three seeds
+// let the median discard its outlier. The wild type, docked once, reported the outlier
+// as fact — and the run showed a +1.03 kcal/mol selectivity for a molecule whose real
+// margin is +0.09.
 //
-// This deliberately breaks the "identical protocol on both tracks" symmetry. That
-// symmetry defended the selectivity margin, which is now known to be ~0 by construction
-// and no longer ranks anything.
-var singleSeed = covalentSeeds[:1]
+// So every track is replicated, and every reported affinity is a median. Three seeds
+// rather than five: an odd count keeps the median unambiguous, one outlier is still
+// outvoted, and the pool is three wide so a track costs one batch either way.
+var screenSeeds = []int{42, 1337, 7}
 
 // maxParallelDocks bounds the seed replicates run at once. Each Vina process is pinned
 // to screenCPU cores, so this must stay small enough that the pool does not oversubscribe
