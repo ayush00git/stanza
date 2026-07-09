@@ -366,11 +366,30 @@ type covalentResult struct {
 	posePDB string
 }
 
-// Screening docking parameters — lower exhaustiveness than a one-off dock, since
-// the generation loop scores many molecules and only needs reliable relative
-// ranking, not final-quality poses.
+// Screening docking parameters.
+//
+// screenExhaustiveness is 16 rather than Vina's default 8. At 8 the search is bimodal on
+// some ligands: it finds either a deep pose with the warhead 5.8 Å from the thiol, or a
+// shallower one at 3.85 Å, depending on the seed — and the covalent verdict follows.
+// Measured over five seeds on two molecules from a real run, at the box the pipeline
+// actually passes Vina:
+//
+//	                     exhaustiveness 8              exhaustiveness 16
+//	unsaturated amide    reach spread 0.81 Å,          reach spread 0.10 Å,
+//	                     one seed feasible → straddles  every seed infeasible → stable
+//	acrylamide           2 of 5 seeds infeasible;      1 of 5 seeds infeasible;
+//	                     3 of 10 three-seed subsets    0 of 10 subsets flip it
+//	                     flip the verdict
+//
+// Doubling exhaustiveness costs roughly twice the CPU per dock, which the concurrent seed
+// pool absorbs. Replicating seeds cannot fix a bimodal search — the seeds resample the
+// same two basins — so this is the lever, and `uncertain` remains the backstop for the
+// ligands that stay genuinely ambiguous.
+//
+// screenCPU is pinned rather than scaled to free cores: Vina is bit-deterministic given
+// (seed, cpu count), and a reproducible geometry is the entire point of replicating.
 const (
-	screenExhaustiveness = 8
+	screenExhaustiveness = 16
 	screenCPU            = 2
 )
 

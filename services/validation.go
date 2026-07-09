@@ -30,22 +30,69 @@ type MoleculeVerdict struct {
 	DropReason string   `json:"drop_reason"` // "" when kept
 }
 
+// ValidationThresholds overrides the pre-filter's drug-likeness defaults for one run.
+// A zero field keeps the script's default.
+//
+// The defaults encode Lipinski's rule of five, which is a heuristic for oral absorption
+// and not a law. Some validated binding sites are only addressable by molecules that
+// break it: every clinical KRAS switch-II inhibitor exceeds the default 500 Da ceiling
+// (sotorasib 533, ARS-1620 540, adagrasib 574), adagrasib carries two rule-of-five
+// violations, and its QED of 0.27 falls under the default 0.30 floor. Left unchanged,
+// the pre-filter would discard all three approved-or-clinical compounds before they were
+// ever docked — while the generation prompt was asking the model to design in exactly
+// that range.
+type ValidationThresholds struct {
+	MWMin, MWMax     float64
+	QEDMin           float64
+	RO5MaxViolations int
+}
+
+// asMap renders only the fields the caller actually set, so unset fields fall through to
+// the script's defaults rather than being overridden with zeros.
+func (t *ValidationThresholds) asMap() map[string]any {
+	if t == nil {
+		return nil
+	}
+	m := map[string]any{}
+	if t.MWMin > 0 {
+		m["mw_min"] = t.MWMin
+	}
+	if t.MWMax > 0 {
+		m["mw_max"] = t.MWMax
+	}
+	if t.QEDMin > 0 {
+		m["qed_min"] = t.QEDMin
+	}
+	if t.RO5MaxViolations > 0 {
+		m["ro5_max_violations"] = t.RO5MaxViolations
+	}
+	if len(m) == 0 {
+		return nil
+	}
+	return m
+}
+
 // ValidateSMILES is Stage 5. It runs the RDKit pre-filter over a batch of raw SMILES
 // for a run and returns one verdict per input, in input order: invalid, duplicate,
 // and non-drug-like molecules are flagged so callers can drop them before spending
 // the (expensive) dock budget. seenInChIKeys carries identities already known for the
-// run so dedupe spans calls, not just this batch. Go has no cheminformatics library,
-// so it shells out to scripts/validate.py, mirroring the mutate.py pattern.
-func ValidateSMILES(ctx context.Context, runID string, smiles, seenInChIKeys []string) ([]MoleculeVerdict, error) {
+// run so dedupe spans calls, not just this batch. thresholds may be nil. Go has no
+// cheminformatics library, so it shells out to scripts/validate.py, mirroring the
+// mutate.py pattern.
+func ValidateSMILES(ctx context.Context, runID string, smiles, seenInChIKeys []string, thresholds *ValidationThresholds) ([]MoleculeVerdict, error) {
 	if len(smiles) == 0 {
 		return nil, nil
 	}
 
-	in, err := json.Marshal(map[string]any{
+	payload := map[string]any{
 		"run_id":         runID,
 		"smiles":         smiles,
 		"seen_inchikeys": seenInChIKeys,
-	})
+	}
+	if th := thresholds.asMap(); th != nil {
+		payload["thresholds"] = th
+	}
+	in, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("validate: marshal input: %w", err)
 	}

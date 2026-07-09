@@ -234,6 +234,30 @@ func writeHistory(b *strings.Builder, history []models.LigandDock, covalent bool
 		"Improve the warhead's geometry and the scaffold's grip on the pocket.\n")
 }
 
+// siteThresholds widens the drug-likeness pre-filter to the weight window a curated site
+// declares, and relaxes the rule-of-five and QED floors along with it.
+//
+// Lipinski's rule of five is a heuristic for oral absorption, not a law, and the switch-II
+// pocket is only addressable by molecules that break it. Every clinical KRAS G12C
+// inhibitor exceeds the default 500 Da ceiling — sotorasib 533, ARS-1620 540, adagrasib
+// 574 — adagrasib carries two rule-of-five violations, and its QED of 0.27 sits under the
+// default 0.30 floor. A filter that drops the approved drug cannot be used to judge a
+// molecule designed to resemble it.
+//
+// Returns nil when the site names no window, leaving the defaults in place.
+func siteThresholds(site *KnownSite) *ValidationThresholds {
+	if site == nil || site.Guidance == nil || site.Guidance.MaxMW <= 0 {
+		return nil
+	}
+	g := site.Guidance
+	return &ValidationThresholds{
+		MWMin:            g.MinMW,
+		MWMax:            g.MaxMW,
+		QEDMin:           0.25, // adagrasib is 0.27
+		RO5MaxViolations: 2,    // adagrasib violates two
+	}
+}
+
 // covalentFeasibility ranks a dock for the prompt. A molecule whose covalent call flips
 // with the docking seed is not evidence of anything, so it sorts with the failures
 // rather than on its median — the same rule the fitness function applies.
@@ -317,7 +341,12 @@ func GenerateCandidates(ctx context.Context, run *models.Run, n int, mu *sync.Mu
 
 	// Stage 5: RDKit pre-filter — parse, canonicalize, dedupe, and drug-likeness
 	// gate, so the dock budget is spent only on viable, unique molecules.
-	verdicts, err := ValidateSMILES(ctx, run.ID, proposed, seenKeys)
+	// The pre-filter must admit the molecules the prompt just asked for. A curated site
+	// that names a weight window widens the drug-likeness gate to match it — otherwise the
+	// model is steered toward 430–620 Da and everything above 500 Da is silently dropped,
+	// which is what happened, and which would also have discarded sotorasib, adagrasib and
+	// ARS-1620 had they been proposed.
+	verdicts, err := ValidateSMILES(ctx, run.ID, proposed, seenKeys, siteThresholds(site))
 	if err != nil {
 		return nil, fmt.Errorf("generation: validation: %w", err)
 	}
