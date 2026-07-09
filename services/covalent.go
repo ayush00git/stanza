@@ -27,40 +27,6 @@ import (
 // directory (the repo root, like scripts/mutate.py and scripts/validate.py).
 const covalentScript = "scripts/covalent.py"
 
-// CovalentParams tune the covalent credit. The credit decays linearly with the
-// warhead-to-thiol reach distance: full credit when the warhead is positioned to
-// bond, none once it is too far to engage, so a better-positioned warhead scores
-// better and the generation loop has a gradient to optimise toward.
-type CovalentParams struct {
-	ReachIdeal float64 // ≤ this (Å): warhead positioned to bond → full credit
-	ReachMax   float64 // > this (Å): warhead cannot engage the thiol → no credit
-	MaxCredit  float64 // kcal/mol credit at ideal geometry
-}
-
-// DefaultCovalentParams returns the calibrated covalent-credit defaults. The reach
-// window (3.5–5.0 Å) brackets the near-attack S···C distance of a docked warhead
-// pose; the 4.0 kcal/mol ceiling gives covalent binders a clear, but not absurd,
-// selectivity margin over non-covalent molecules docked into the same pocket.
-func DefaultCovalentParams() CovalentParams {
-	return CovalentParams{ReachIdeal: 3.5, ReachMax: 5.0, MaxCredit: 4.0}
-}
-
-// covalentCredit maps a warhead-reactive-carbon → thiol-SG reach distance (Å) to a
-// covalent credit (kcal/mol): MaxCredit at/below ReachIdeal, linearly to 0 at
-// ReachMax, and 0 beyond. A non-positive reach window yields no credit.
-func covalentCredit(reach float64, p CovalentParams) float64 {
-	if p.MaxCredit <= 0 || p.ReachMax <= p.ReachIdeal {
-		return 0
-	}
-	if reach <= p.ReachIdeal {
-		return p.MaxCredit
-	}
-	if reach >= p.ReachMax {
-		return 0
-	}
-	return p.MaxCredit * (p.ReachMax - reach) / (p.ReachMax - p.ReachIdeal)
-}
-
 // isCovalentTarget reports whether a mutated residue is a nucleophile our warheads
 // react with. The warhead SMARTS in covalent.py are cysteine-thiol Michael
 // acceptors and SN2 electrophiles, so only cysteine qualifies today; adding Ser/Lys
@@ -81,11 +47,21 @@ const (
 )
 
 // covalentAssessment mirrors the JSON emitted by scripts/covalent.py `assess`.
+//
+// All chemistry and geometry live in the script; Go never applies a threshold. The
+// script returns Feasibility in [0,1] — 0 meaning the warhead cannot attack the
+// thiol from any pose the receptor actually binds — together with the geometry that
+// produced it, so the number can always be audited back to a distance, an angle and
+// a named docking mode.
 type covalentAssessment struct {
 	HasWarhead    bool     `json:"has_warhead"`
 	WarheadType   string   `json:"warhead_type"`
 	Status        string   `json:"status"`
+	Feasibility   *float64 `json:"feasibility"`    // nil unless Status == assessMeasured
 	ReachDistance *float64 `json:"reach_distance"` // nil unless Status == assessMeasured
+	AttackAngle   float64  `json:"attack_angle"`   // degrees at the electrophilic carbon
+	ModeRank      int      `json:"mode_rank"`      // 1-based Vina mode the geometry came from
+	ModeAffinity  float64  `json:"mode_affinity"`  // that mode's affinity (kcal/mol)
 	ModesRead     int      `json:"modes_read"`
 	BondDistance  float64  `json:"bond_distance"` // S–C of the emitted tether pose
 	TetherRMSD    float64  `json:"tether_rmsd"`   // heavy-atom drift from the docked pose
@@ -113,12 +89,13 @@ func HasCovalentWarhead(ctx context.Context, smiles string) (bool, string, error
 	return r.HasWarhead, r.WarheadType, nil
 }
 
-// assessCovalent runs scripts/covalent.py `assess`: it scans the mutant docked pose
-// for the mode whose warhead electrophilic carbon comes closest to the cysteine SG,
-// and (when tetherOut is set) writes the tethered covalent-complex pose there.
-// tetherMaxReach skips the tether for a warhead too far away to bond, since forcing
-// the bond onto such a pose only yields a distorted structure.
-func assessCovalent(ctx context.Context, smiles, posePDBQT, receptorPDB, chain string, resnum int, tetherOut string, tetherMaxReach float64) (*covalentAssessment, error) {
+// assessCovalent runs scripts/covalent.py `assess`: across the docked modes that the
+// receptor actually binds, it finds the pose from which the warhead's electrophilic
+// carbon can attack the cysteine thiol, and scores that geometry as a feasibility in
+// [0,1]. When tetherOut is set it also writes the tethered covalent-complex pose (the
+// script skips the tether for an infeasible warhead, since forcing a bond onto such a
+// pose only yields a distorted structure).
+func assessCovalent(ctx context.Context, smiles, posePDBQT, receptorPDB, chain string, resnum int, tetherOut string) (*covalentAssessment, error) {
 	args := []string{covalentScript, "assess",
 		"--smiles", smiles,
 		"--pose", posePDBQT,
@@ -127,8 +104,7 @@ func assessCovalent(ctx context.Context, smiles, posePDBQT, receptorPDB, chain s
 		"--resnum", strconv.Itoa(resnum),
 	}
 	if tetherOut != "" {
-		args = append(args, "--tether-out", tetherOut,
-			"--tether-max-reach", strconv.FormatFloat(tetherMaxReach, 'f', 3, 64))
+		args = append(args, "--tether-out", tetherOut)
 	}
 	cmd := exec.CommandContext(ctx, "python3", args...)
 	out, err := cmd.Output()

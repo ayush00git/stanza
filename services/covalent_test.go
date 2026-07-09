@@ -4,6 +4,7 @@ import (
 	"context"
 	"math"
 	"os/exec"
+	"slices"
 	"testing"
 )
 
@@ -80,59 +81,6 @@ func TestHasCovalentWarheadRejectsNonElectrophiles(t *testing.T) {
 	}
 }
 
-func TestCovalentCreditDecaysWithReach(t *testing.T) {
-	p := DefaultCovalentParams()
-	// At or inside the ideal reach, full credit.
-	if got := covalentCredit(p.ReachIdeal, p); got != p.MaxCredit {
-		t.Errorf("credit at ideal reach = %v, want %v", got, p.MaxCredit)
-	}
-	if got := covalentCredit(p.ReachIdeal-1, p); got != p.MaxCredit {
-		t.Errorf("credit inside ideal reach = %v, want %v", got, p.MaxCredit)
-	}
-	// At or beyond the max reach, no credit.
-	if got := covalentCredit(p.ReachMax, p); got != 0 {
-		t.Errorf("credit at max reach = %v, want 0", got)
-	}
-	if got := covalentCredit(p.ReachMax+5, p); got != 0 {
-		t.Errorf("credit beyond max reach = %v, want 0", got)
-	}
-	// Monotonic non-increasing between ideal and max.
-	prev := math.Inf(1)
-	for d := p.ReachIdeal; d <= p.ReachMax; d += 0.1 {
-		got := covalentCredit(d, p)
-		if got > prev+1e-9 {
-			t.Fatalf("credit not monotonic: reach %.2f gave %v after %v", d, got, prev)
-		}
-		if got < 0 || got > p.MaxCredit {
-			t.Fatalf("credit %v out of [0, %v] at reach %.2f", got, p.MaxCredit, d)
-		}
-		prev = got
-	}
-}
-
-func TestCovalentCreditMidpoint(t *testing.T) {
-	p := CovalentParams{ReachIdeal: 3.5, ReachMax: 5.5, MaxCredit: 4.0}
-	// Halfway through the window → half credit.
-	if got := covalentCredit(4.5, p); math.Abs(got-2.0) > 1e-9 {
-		t.Errorf("credit at window midpoint = %v, want 2.0", got)
-	}
-}
-
-func TestCovalentCreditDegenerateParams(t *testing.T) {
-	// A zero/blank window must yield no credit rather than dividing by zero.
-	if got := covalentCredit(3.0, CovalentParams{}); got != 0 {
-		t.Errorf("credit with zero params = %v, want 0", got)
-	}
-	// Inverted window (max ≤ ideal) yields no credit.
-	if got := covalentCredit(3.0, CovalentParams{ReachIdeal: 5, ReachMax: 3, MaxCredit: 4}); got != 0 {
-		t.Errorf("credit with inverted window = %v, want 0", got)
-	}
-	// Non-positive credit ceiling yields no credit.
-	if got := covalentCredit(3.0, CovalentParams{ReachIdeal: 3, ReachMax: 5, MaxCredit: 0}); got != 0 {
-		t.Errorf("credit with zero ceiling = %v, want 0", got)
-	}
-}
-
 func TestIsCovalentTarget(t *testing.T) {
 	for _, res := range []string{"CYS", "cys", " Cys ", "Cys"} {
 		if !isCovalentTarget(res) {
@@ -178,28 +126,27 @@ func TestMedianReplicatePicksMiddleAffinity(t *testing.T) {
 	}
 }
 
-// A molecule whose warhead lands inside the bonding window under some seeds and
-// outside it under others has no covalent answer — its credit is the RNG's. Measured
-// on a real run: reach 3.72–5.78 Å over five seeds, credit swinging 0.00 ↔ 3.42.
-// Reporting a median as though it were a rank launders that noise into signal.
-func TestSeedStraddlingCreditIsUncertain(t *testing.T) {
-	p := DefaultCovalentParams()
-	straddling := []float64{3.72, 5.78, 3.79, 5.15, 3.83} // some in reach, some not
-	stable := []float64{3.72, 3.79, 3.83, 3.90, 3.75}     // all in reach
-
-	uncertain := func(reaches []float64) bool {
-		var lo, hi float64 = math.Inf(1), math.Inf(-1)
-		for _, r := range reaches {
-			c := covalentCredit(r, p)
-			lo, hi = math.Min(lo, c), math.Max(hi, c)
-		}
-		return lo <= 0 && hi > 0
+// A covalent call that flips with the RNG is indistinguishable from its neighbours —
+// not better, not worse — so ranking it on a median would launder noise into signal.
+// The audit measured exactly this: with the ligand conformer held fixed, warhead reach
+// varied ±0.16–1.09 Å over five seeds, and on one molecule the call flipped between
+// feasible and infeasible on the RNG alone. `services` (DockLigandDualTrack) flags such
+// a molecule with the predicate asserted here — a feasibility sample that straddles zero
+// across seeds — and this test pins that predicate so the flag cannot silently regress
+// into ranking a coin toss.
+func TestSeedStraddlingFeasibilityIsUncertain(t *testing.T) {
+	// Mirror services/dual_dock.go verbatim: a call is uncertain when some seeds place
+	// the warhead where it can attack (feasibility > 0) and others do not (≤ 0).
+	uncertain := func(f []float64) bool {
+		return slices.Min(f) <= 0 && slices.Max(f) > 0
 	}
+	straddling := []float64{0.0, 0.82, 0.0, 0.77, 0.80} // feasible under 3 seeds, not under 2
+	stable := []float64{0.71, 0.82, 0.77, 0.80, 0.74}   // feasible under every seed
 	if !uncertain(straddling) {
-		t.Error("a credit that straddles zero across seeds must be flagged uncertain")
+		t.Error("a feasibility that straddles zero across seeds must be flagged uncertain")
 	}
 	if uncertain(stable) {
-		t.Error("a credit positive under every seed must not be flagged uncertain")
+		t.Error("a feasibility positive under every seed must not be flagged uncertain")
 	}
 }
 

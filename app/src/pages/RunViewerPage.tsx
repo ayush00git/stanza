@@ -6,7 +6,7 @@ import {
   getRun,
   getRunPockets,
   getRunRanking,
-  isCovalentCredited,
+  isCovalentFeasible,
   runStructureUrl,
   type Candidate,
   type CovalentDock,
@@ -80,9 +80,11 @@ function StructurePanel({
 }
 
 /**
- * Caption shown under a viewer while a docked pose is loaded into it. When a
- * covalent tether is passed (the mutant panel), it says so — the pose shown there
- * is the tethered covalent complex, not a free dock.
+ * Caption shown under a viewer while a docked pose is loaded into it. Only the
+ * mutant panel passes `covalent`. A 'tethered' record means the pose shown here IS
+ * the covalent adduct — the bond the wild type's Gly12 cannot form; a 'feasible'
+ * record is still a reversible docked pose, annotated that the warhead could attack.
+ * It never reports a covalent energy: covalent potency is kinetic, not a ΔG.
  */
 function PoseCaption({
   smiles,
@@ -96,16 +98,25 @@ function PoseCaption({
   onClear: () => void
 }) {
   const sel = selectivity > 0 ? `+${selectivity.toFixed(2)}` : selectivity.toFixed(2).replace('-', '−')
+  const warhead = (covalent?.warhead_type ?? '').replace(/_/g, ' ')
+
+  let caption: string
+  if (covalent?.status === 'tethered') {
+    // The pose loaded here is the tethered adduct itself, not a reversible dock.
+    const bond = covalent.bond_distance ? ` · S–C ${covalent.bond_distance.toFixed(2)} Å` : ''
+    caption = `Covalent adduct → ${covalent.target_residue} · ${warhead} · feasibility ${covalent.feasibility.toFixed(2)}${bond}`
+  } else if (covalent && isCovalentFeasible(covalent)) {
+    // 'feasible': the warhead can attack, but no adduct pose was built — this is the docked pose.
+    const reach = covalent.reach_distance != null ? ` · reach ${covalent.reach_distance.toFixed(2)} Å` : ''
+    caption = `Docked pose · warhead can attack ${covalent.target_residue} · feasibility ${covalent.feasibility.toFixed(2)}${reach}`
+  } else {
+    caption = `Docked pose · selectivity ${sel}`
+  }
+
   return (
     <div className="flex items-center justify-between gap-3 border-t border-hairline bg-accent-soft px-3 py-1.5">
       <span className="min-w-0 truncate text-xs text-accent" title={covalent ? covalentTitle(covalent) : smiles}>
-        {/* Only a 'tethered' record replaced the docked pose with the covalent complex;
-            an 'in_reach' molecule earned its credit but is still shown as docked. */}
-        {covalent?.status === 'tethered'
-          ? `Covalent tether → ${covalent.target_residue} · ${(covalent.warhead_type ?? '').replace(/_/g, ' ')} · selectivity ${sel}`
-          : covalent && isCovalentCredited(covalent)
-            ? `Docked pose · +${covalent.credit.toFixed(1)} covalent credit · selectivity ${sel}`
-            : `Docked pose · selectivity ${sel}`}
+        {caption}
       </span>
       <button
         type="button"

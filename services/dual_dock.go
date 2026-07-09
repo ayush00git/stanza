@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"slices"
@@ -76,14 +77,13 @@ func DockLigandDualTrack(ctx context.Context, run *models.Run, smiles string) (*
 		MutantPosePDB: mutBest.posePDB,
 	}
 
-	// Covalent adjustment: when the mutated residue is a cysteine and the ligand
-	// carries a warhead that docks within reach of the thiol, credit the covalent
-	// bond on the mutant score. The WT track (no thiol) never earns this, so the
-	// credit is the WT/mutant selectivity that non-covalent Vina cannot see.
+	// Covalent geometry: when the mutated residue is a cysteine and the ligand carries
+	// a warhead, report whether that warhead can actually attack the thiol. This is
+	// recorded BESIDE the affinity, never inside it — the covalent bond is not a Vina
+	// energy, and a constant folded into MutantScore would turn Selectivity into a
+	// restatement of that constant.
 	if isCovalentTarget(run.Mutagenesis.MutantResidue) {
-		if adj, cov := applyCovalent(ctx, run, smiles, mutScore, mut, mutDir); cov != nil {
-			mutScore = adj
-			dock.MutantScore = round2(adj)
+		if cov := assessCovalentGeometry(ctx, run, smiles, mut, mutDir); cov != nil {
 			covDock := cov.CovalentDock
 			dock.Covalent = &covDock
 			if cov.posePDB != "" {
@@ -92,6 +92,10 @@ func DockLigandDualTrack(ctx context.Context, run *models.Run, smiles string) (*
 		}
 	}
 
+	// Selectivity is the NON-COVALENT margin, and for a covalent target it is expected
+	// to be ~0: Gly12→Cys12 barely perturbs the reversible contact set, and pan-KRAS
+	// binders engage WT, G12C, G12D, G12V and G13D at indistinguishable affinity. A
+	// covalent inhibitor's real selectivity is kinetic and lives in Covalent, not here.
 	dock.Selectivity = round2(wtScore - mutScore)
 	return dock, nil
 }
@@ -126,59 +130,60 @@ func spread(xs []float64) float64 {
 	return slices.Max(xs) - slices.Min(xs)
 }
 
-// applyCovalent runs the covalent assessment on the mutant docked pose and returns
-// the (possibly credited) mutant score together with the CovalentDock record.
+// assessCovalentGeometry runs the covalent assessment on every mutant replicate and
+// returns the CovalentDock record describing whether the warhead can attack the thiol.
 //
-// It returns a record for EVERY warhead-bearing molecule, credited or not, so that
-// "the warhead cannot reach the thiol" and "the measurement failed" stay visible
-// instead of degrading into the same silent non-covalent result. Only a molecule
-// with no warhead at all yields (mutScore, nil). The dock never errors on a covalent
-// failure: a run that cannot model the bond still has a valid non-covalent score.
-func applyCovalent(ctx context.Context, run *models.Run, smiles string, mutScore float64, reps []replicate, outDir string) (float64, *covalentResult) {
-	params := DefaultCovalentParams()
+// It NEVER touches the mutant affinity. Vina has no covalent term, and a constant
+// bolted onto the score would make the selectivity margin a restatement of that
+// constant — which is precisely what the previous credit model did. Feasibility is
+// reported alongside the score, not folded into it.
+//
+// A record comes back for EVERY warhead-bearing molecule, feasible or not, so that
+// "the warhead cannot attack the thiol" and "the measurement failed" stay visible
+// instead of degrading into the same silent non-covalent result. Only a molecule with
+// no warhead at all yields nil. The dock never errors on a covalent failure: a run
+// that cannot model the bond still has a valid non-covalent score.
+func assessCovalentGeometry(ctx context.Context, run *models.Run, smiles string, reps []replicate, outDir string) *covalentResult {
 	target := resToken(run.Mutagenesis.MutantResidue, run.Mutagenesis.TargetResidueNum)
 	record := func(status, warhead, note string) *covalentResult {
 		return &covalentResult{CovalentDock: models.CovalentDock{
-			TargetResidue:    target,
-			WarheadType:      warhead,
-			Status:           status,
-			NonCovalentScore: round2(mutScore),
-			Replicates:       len(reps),
-			Note:             note,
+			TargetResidue: target,
+			WarheadType:   warhead,
+			Status:        status,
+			Replicates:    len(reps),
+			Note:          note,
 		}}
 	}
 
-	// Assess every replicate: reach is the noisy quantity, so one seed's answer is
-	// not an answer. The tether is built only for the median replicate, below.
+	// Assess every replicate: the geometry is the noisy quantity, so one seed's answer
+	// is not an answer. The tether is built only for the median replicate, below.
 	var (
-		reaches  []float64
+		measured []*covalentAssessment
 		warhead  string
 		firstErr error
 		lastFail string
 	)
-	assessed := make([]*covalentAssessment, len(reps))
-	for i, rep := range reps {
+	for _, rep := range reps {
 		a, err := assessCovalent(ctx, smiles, rep.posePDBQT,
 			RunStructurePath(run.ID, "mutant"),
 			run.Mutagenesis.TargetChain, run.Mutagenesis.TargetResidueNum,
-			"", 0) // no tether on the scan pass
+			"") // no tether on the scan pass
 		if err != nil {
 			if firstErr == nil {
 				firstErr = err
 			}
 			continue
 		}
-		assessed[i] = a
 		if !a.HasWarhead {
-			return mutScore, nil
+			return nil
 		}
 		warhead = a.WarheadType
 		switch a.Status {
 		case assessNoThiol:
-			return mutScore, record(models.CovalentNoThiol, warhead, "")
+			return record(models.CovalentNoThiol, warhead, "")
 		case assessMeasured:
-			if a.ReachDistance != nil {
-				reaches = append(reaches, *a.ReachDistance)
+			if a.Feasibility != nil && a.ReachDistance != nil {
+				measured = append(measured, a)
 			}
 		case assessUnreadable:
 			lastFail = fmt.Sprintf("no warhead atom located across %d docked modes", a.ModesRead)
@@ -186,64 +191,70 @@ func applyCovalent(ctx context.Context, run *models.Run, smiles string, mutScore
 			lastFail = fmt.Sprintf("unexpected assessment status %q", a.Status)
 		}
 	}
-	if len(reaches) == 0 {
+	if len(measured) == 0 {
 		if firstErr != nil {
-			return mutScore, record(models.CovalentAssessFailed, warhead, truncate(firstErr.Error(), 200))
+			return record(models.CovalentAssessFailed, warhead, truncate(firstErr.Error(), 200))
 		}
-		return mutScore, record(models.CovalentUnreadable, warhead, lastFail)
+		return record(models.CovalentUnreadable, warhead, lastFail)
 	}
 
-	// Median reach, and the credit each seed would have produced. When some seeds
-	// credit the bond and others do not, the covalent call is decided by the RNG —
-	// surface that rather than letting whichever seed ran first set the score.
-	credits := make([]float64, len(reaches))
-	for i, r := range reaches {
-		credits[i] = covalentCredit(r, params)
-	}
-	reach := median(reaches)
-	credit := covalentCredit(reach, params)
-	uncertain := slices.Min(credits) <= 0 && slices.Max(credits) > 0
-
-	if credit <= 0 {
-		out := record(models.CovalentOutOfReach, warhead, "")
-		out.ReachDistance = round2(reach)
-		out.ReachSpread = round2(spread(reaches))
-		out.Uncertain = uncertain
-		return mutScore, out
+	feasibilities := make([]float64, len(measured))
+	reaches := make([]float64, len(measured))
+	for i, a := range measured {
+		feasibilities[i] = *a.Feasibility
+		reaches[i] = *a.ReachDistance
 	}
 
-	cov := &covalentResult{
-		CovalentDock: models.CovalentDock{
-			TargetResidue:    target,
-			WarheadType:      warhead,
-			Status:           models.CovalentInReach,
-			ReachDistance:    round2(reach),
-			ReachSpread:      round2(spread(reaches)),
-			Credit:           round2(credit),
-			NonCovalentScore: round2(mutScore),
-			Replicates:       len(reaches),
-			Uncertain:        uncertain,
-		},
+	// When some seeds find an attackable geometry and others do not, the covalent call
+	// is decided by the RNG — surface that rather than letting the median stand in for
+	// a fact.
+	feasibility := median(feasibilities)
+	uncertain := slices.Min(feasibilities) <= 0 && slices.Max(feasibilities) > 0
+
+	// The replicate whose feasibility IS the median supplies the reported angle and
+	// mode, so every number in the record comes from one real pose rather than being
+	// averaged across poses that never coexisted.
+	repr := slices.MinFunc(measured, func(a, b *covalentAssessment) int {
+		return cmp.Compare(math.Abs(*a.Feasibility-feasibility), math.Abs(*b.Feasibility-feasibility))
+	})
+
+	cov := &covalentResult{CovalentDock: models.CovalentDock{
+		TargetResidue: target,
+		WarheadType:   warhead,
+		Status:        models.CovalentFeasible,
+		Feasibility:   round2(feasibility),
+		ReachDistance: round2(median(reaches)),
+		ReachSpread:   round2(spread(reaches)),
+		AttackAngle:   round2(repr.AttackAngle),
+		ModeRank:      repr.ModeRank,
+		ModeAffinity:  round2(repr.ModeAffinity),
+		Replicates:    len(measured),
+		Uncertain:     uncertain,
+	}}
+	if feasibility <= 0 {
+		cov.Status = models.CovalentInfeasible
+		return cov
 	}
 
 	// Build the tether from the median-affinity replicate, the same pose the viewer
 	// shows. It only supersedes the docked pose when the helper actually closed the
 	// S–C bond without driving the ligand into the receptor.
-	best := medianReplicate(reps)
 	tetherOut := filepath.Join(outDir, "tether.pdb")
-	if a, err := assessCovalent(ctx, smiles, best.posePDBQT,
+	if a, err := assessCovalent(ctx, smiles, medianReplicate(reps).posePDBQT,
 		RunStructurePath(run.ID, "mutant"),
 		run.Mutagenesis.TargetChain, run.Mutagenesis.TargetResidueNum,
-		tetherOut, params.ReachMax); err == nil && a.TetherWritten {
-		if b, e := os.ReadFile(tetherOut); e == nil {
-			cov.posePDB = string(b)
-			cov.Status = models.CovalentTethered
-			cov.BondDistance = round2(a.BondDistance)
+		tetherOut); err == nil {
+		if a.TetherWritten {
+			if b, e := os.ReadFile(tetherOut); e == nil {
+				cov.posePDB = string(b)
+				cov.Status = models.CovalentTethered
+				cov.BondDistance = round2(a.BondDistance)
+			}
+		} else {
+			cov.Note = truncate(a.TetherError, 200)
 		}
-	} else if err == nil {
-		cov.Note = truncate(a.TetherError, 200)
 	}
-	return mutScore - credit, cov
+	return cov
 }
 
 // truncate bounds a note so a runaway helper message cannot bloat the stored record.

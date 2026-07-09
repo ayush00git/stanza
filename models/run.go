@@ -69,15 +69,16 @@ type PocketAnalysis struct {
 type LigandDock struct {
 	SMILES      string  `json:"smiles"`
 	WTScore     float64 `json:"wt_score"`     // Vina affinity (kcal/mol); more negative = stronger
-	MutantScore float64 `json:"mutant_score"` // mutant affinity; covalent-adjusted when Covalent != nil
+	MutantScore float64 `json:"mutant_score"` // raw mutant Vina affinity; never covalent-adjusted
 	Selectivity float64 `json:"selectivity"`  // wt_score - mutant_score; large positive spares WT
 	WTPosePDB   string  `json:"wt_pose_pdb,omitempty"`
 	MutantPosePDB string `json:"mutant_pose_pdb,omitempty"`
 	// Covalent is set whenever a warhead-bearing molecule is docked against a mutated
-	// cysteine, whatever the outcome — see CovalentStatus. MutantScore includes the
-	// covalent credit only when Credit > 0, and MutantPosePDB is the tethered complex
-	// only when Status is CovalentTethered. nil for non-covalent molecules and
-	// non-cysteine targets.
+	// cysteine, whatever the outcome — see the Covalent* status constants. It never
+	// alters MutantScore: the covalent bond is not a Vina energy and folding a
+	// constant into the affinity would make Selectivity a restatement of that
+	// constant. MutantPosePDB is the tethered complex only when Status is
+	// CovalentTethered. nil for non-covalent molecules and non-cysteine targets.
 	Covalent *CovalentDock `json:"covalent,omitempty"`
 }
 
@@ -86,37 +87,45 @@ type LigandDock struct {
 // simply carries no warhead — reporting all three as "not covalent" is what let a
 // broken reach measurement look like an honest negative.
 const (
-	CovalentTethered     = "tethered"        // credit applied; a valid tethered pose was built
-	CovalentInReach      = "in_reach"        // credit applied; the tether pose was rejected
-	CovalentOutOfReach   = "out_of_reach"    // warhead present but too far from the thiol to bond
+	CovalentTethered     = "tethered"        // geometry permits the bond; a valid adduct pose was built
+	CovalentFeasible     = "feasible"        // geometry permits the bond; the adduct pose was rejected
+	CovalentInfeasible   = "infeasible"      // warhead present but cannot attack the thiol
 	CovalentUnreadable   = "unreadable_pose" // no docked mode could be mapped onto the ligand
 	CovalentAssessFailed = "assess_failed"   // the assessment itself errored
 	CovalentNoThiol      = "no_thiol"        // the target residue carries no SG
 )
 
-// CovalentDock records the covalent-tether model applied to the mutant track. Vina
-// scores non-covalently, so the WT/mutant selectivity of a covalent warhead is
-// invisible to it; this captures the geometry that recovers it — whether the
-// warhead reaches the cysteine thiol — and the credit that models the bond only the
-// mutant can form.
+// CovalentDock records whether a warhead can actually attack the mutated cysteine.
 //
-// The credit magnitude is a model parameter, not a Vina energy. What is physically
-// measured is ReachDistance: whether the warhead can reach the thiol at all.
+// It deliberately carries NO energy. Vina scores non-covalently and cannot see the
+// bond that creates a covalent inhibitor's selectivity; the previous model bolted a
+// constant "credit" (4.0 kcal/mol) onto the mutant affinity to stand in for it. That
+// was wrong three ways: covalent potency is kinetic (kinact/KI, spanning 76 →
+// 35,000 M⁻¹s⁻¹ from ARS-853 to adagrasib, which one constant cannot separate); the
+// wild type has no thiol at all, so the discrimination is unbounded rather than a
+// few kcal/mol; and since the WT and mutant non-covalent scores agree to ~0.1
+// kcal/mol, "selectivity" collapsed into a restatement of the constant.
+//
+// What IS measurable from a docked pose is geometry: can the warhead's electrophilic
+// carbon reach the thiol, along a trajectory that permits nucleophilic attack, in a
+// pose the receptor actually binds? Feasibility reports exactly that, and nothing
+// more. It is dimensionless on purpose.
 type CovalentDock struct {
-	TargetResidue    string  `json:"target_residue"`           // e.g. "Cys12"
-	WarheadType      string  `json:"warhead_type,omitempty"`   // e.g. "acrylamide"
-	Status           string  `json:"status"`                   // one of the Covalent* constants
-	ReachDistance    float64 `json:"reach_distance,omitempty"` // MEDIAN warhead-C → thiol-SG over replicates (Å)
-	ReachSpread      float64 `json:"reach_spread,omitempty"`   // max − min reach across replicates (Å)
-	Replicates       int     `json:"replicates,omitempty"`     // docking seeds the reach was measured over
-	Credit           float64 `json:"credit"`                   // covalent credit applied to the mutant score (kcal/mol)
-	NonCovalentScore float64 `json:"non_covalent_score"`       // raw Vina mutant affinity before the credit
-	BondDistance     float64 `json:"bond_distance,omitempty"`  // S–C of the emitted tether pose (Å)
+	TargetResidue string  `json:"target_residue"`           // e.g. "Cys12"
+	WarheadType   string  `json:"warhead_type,omitempty"`   // e.g. "acrylamide"
+	Status        string  `json:"status"`                   // one of the Covalent* constants
+	Feasibility   float64 `json:"feasibility"`              // 0–1; 0 = the warhead cannot attack the thiol
+	ReachDistance float64 `json:"reach_distance,omitempty"` // MEDIAN warhead-C → thiol-SG over replicates (Å)
+	ReachSpread   float64 `json:"reach_spread,omitempty"`   // max − min reach across replicates (Å)
+	AttackAngle   float64 `json:"attack_angle,omitempty"`   // approach angle at the electrophilic carbon (degrees)
+	ModeRank      int     `json:"mode_rank,omitempty"`      // 1-based Vina mode the geometry came from
+	ModeAffinity  float64 `json:"mode_affinity,omitempty"`  // that mode's Vina affinity (kcal/mol)
+	Replicates    int     `json:"replicates,omitempty"`     // docking seeds the geometry was measured over
+	BondDistance  float64 `json:"bond_distance,omitempty"`  // S–C of the emitted tether pose (Å)
 	// Uncertain marks a molecule whose covalent call flips with the docking seed:
-	// some replicates place the warhead in bonding range and others do not, so the
-	// credit — and therefore the whole selectivity margin — is decided by the RNG.
-	// Such a molecule is not "better" or "worse" than its neighbours; it is
-	// indistinguishable, and ranking it on a median would launder noise into signal.
+	// some replicates place the warhead where it can attack and others do not. Such a
+	// molecule is not "better" or "worse" than its neighbours; it is indistinguishable,
+	// and ranking it on a median would launder noise into signal.
 	Uncertain bool   `json:"uncertain,omitempty"`
 	Note      string `json:"note,omitempty"` // why a tether or an assessment failed
 }

@@ -474,24 +474,30 @@ export type RunPocketAnalysis = {
  * paired affinities, the selectivity margin, and both poses. Mirrors
  * models.LigandDock. Sign convention: Vina kcal/mol, more negative = tighter;
  * selectivity = wt_score − mutant_score, large positive = mutant-selective.
+ * mutant_score is the RAW Vina affinity (no covalent adjustment). For a covalent
+ * target the non-covalent selectivity reads ≈0 — a Gly12→Cys12 swap barely
+ * perturbs reversible binding — and that is correct; the covalent evidence lives
+ * in `covalent`, not here.
  */
 /**
- * The covalent-tether model applied to the mutant track. Vina scores
- * non-covalently, so a warhead's WT/mutant selectivity is invisible to it; this
- * records the geometry that recovers it — whether the warhead reaches the mutated
- * cysteine's thiol — and the credit modelling the bond only the mutant can form.
- * Mirrors models.CovalentDock. Present only for covalent binders on a cysteine
- * target; mutant_pose_pdb is then the tethered covalent complex.
+ * Whether a warhead can actually attack the mutated cysteine. Vina scores
+ * non-covalently and cannot see the bond that gives a covalent inhibitor its
+ * WT/mutant selectivity, so this records the one thing a docked pose can prove:
+ * the geometry — does the warhead's electrophilic carbon reach the thiol, along a
+ * trajectory that permits nucleophilic attack, in a pose the receptor binds?
+ * Mirrors models.CovalentDock. Present only for warhead-bearing molecules on a
+ * cysteine target; mutant_pose_pdb is the tethered adduct only when status is
+ * 'tethered'.
  */
 /**
- * Why a warhead did or did not earn its covalent credit. A warhead that cannot reach
- * the thiol and a warhead whose measurement failed are different facts, and both
+ * Why a warhead can or cannot bond the thiol. A warhead that cannot reach the
+ * thiol and a warhead whose measurement failed are different facts, and both
  * differ from a molecule carrying no warhead at all (which has no CovalentDock).
  */
 export type CovalentStatus =
-  | 'tethered' // credit applied; mutant_pose_pdb is the tethered complex
-  | 'in_reach' // credit applied; the tethered pose was rejected
-  | 'out_of_reach' // warhead present but too far from the thiol to bond
+  | 'tethered' // geometry permits the bond; a valid adduct pose was built
+  | 'feasible' // geometry permits the bond; the adduct pose was rejected
+  | 'infeasible' // warhead present but cannot attack the thiol (too far or wrong angle)
   | 'unreadable_pose' // no docked mode could be mapped onto the ligand
   | 'assess_failed' // the assessment itself errored
   | 'no_thiol' // the target residue carries no SG
@@ -500,20 +506,25 @@ export type CovalentDock = {
   target_residue: string // e.g. "Cys12"
   warhead_type?: string // e.g. "acrylamide"
   status: CovalentStatus
+  // Feasibility is DIMENSIONLESS, not an energy. Covalent potency is kinetic
+  // (kinact/KI), never a ΔG, so this is a 0–1 geometric plausibility, not kcal/mol.
+  // 0 = the warhead cannot attack the thiol.
+  feasibility: number // 0–1
   reach_distance?: number // MEDIAN warhead-C → thiol-SG over replicate seeds (Å)
   reach_spread?: number // max − min reach across replicates (Å)
-  replicates?: number // docking seeds the reach was measured over
-  credit: number // covalent credit applied to the mutant score (kcal/mol); 0 unless credited
-  non_covalent_score: number // raw Vina mutant affinity before the credit
-  bond_distance?: number // S–C of the tethered pose (Å)
+  attack_angle?: number // approach angle at the electrophilic carbon (degrees; ~105° Michael, ~180° SN2)
+  mode_rank?: number // 1-based Vina mode the geometry came from
+  mode_affinity?: number // that mode's Vina affinity (kcal/mol)
+  replicates?: number // docking seeds the geometry was measured over
+  bond_distance?: number // S–C of the tethered adduct pose (Å)
   /** The covalent call flips with the docking seed — treat as indistinguishable, not ranked. */
   uncertain?: boolean
   note?: string // why a tether or an assessment failed
 }
 
-/** Whether the covalent bond was modelled and the mutant score credited for it. */
-export function isCovalentCredited(c: CovalentDock): boolean {
-  return c.status === 'tethered' || c.status === 'in_reach'
+/** Whether the warhead can attack the thiol — a geometry verdict, not an energy credit. */
+export function isCovalentFeasible(c: CovalentDock): boolean {
+  return c.status === 'tethered' || c.status === 'feasible'
 }
 
 export type LigandDock = {
@@ -562,7 +573,9 @@ export type Scores = {
   qed?: number | null
   fitness?: number | null
   status: 'scored' | 'incomplete' | string
-  /** Present when the mutant score includes a covalent tether credit. */
+  /** 0–1 geometric plausibility that the warhead can bond the thiol; mirrors CovalentDock.feasibility. Dimensionless, not an energy. */
+  covalent_feasibility?: number | null
+  /** Present for warhead-bearing molecules on a cysteine target — the covalent geometry verdict, not a score adjustment. */
   covalent?: CovalentDock
 }
 
@@ -577,8 +590,11 @@ export type RankedMolecule = {
 /** Fitness term weights. Mirrors scoring.FitnessWeights. */
 export type FitnessWeights = {
   potency: number
+  /** Non-covalent WT/mutant margin. ≈0 for a covalent target, so weighted lightly. */
   selectivity: number
   drug_likeness: number
+  /** Dimensionless covalent-attack geometry (0–1) — the only covalent evidence a dock yields. */
+  covalent_feasibility: number
 }
 
 /** The computed selectivity leaderboard for a run (Stage 7). Mirrors scoring.Ranking. */

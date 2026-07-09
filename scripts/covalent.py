@@ -8,14 +8,20 @@ the drug physically cannot attach). This script supplies the geometry Vina is
 blind to:
 
   detect  — does a SMILES carry a cysteine-reactive warhead, and of what class.
-  assess  — given a Vina multi-mode docked pose and the target cysteine, find the
-            docked mode whose warhead electrophilic carbon comes closest to the Cys
-            SG (scanned across ALL modes, since the covalently-competent orientation
-            is often not the top-scoring non-covalent pose), and optionally write
-            the tethered covalent-complex pose (warhead bonded to SG).
+  assess  — given a Vina multi-mode docked pose and the target cysteine, score how
+            feasibly the warhead's electrophilic carbon can attack the Cys SG. Every
+            docked mode the receptor actually binds (within an energy window of the
+            best mode) is scanned — the covalently-competent orientation is often not
+            the top-scoring non-covalent pose — and the geometry is scored as a
+            feasibility in [0,1] from BOTH the S···C reach and the attack angle. The
+            most feasible pose wins; optionally the tethered covalent-complex pose
+            (warhead bonded to SG) is written.
 
-The Go side turns the reported reach distance into a covalent credit and applies
-it to the mutant score; this script does only chemistry and geometry.
+Feasibility, not distance, is the output: the minimum of a distance over stochastic
+samples is a downward-biased estimator that rewards conformational promiscuity, and a
+distance with no trajectory says nothing about whether attack can occur. The Go side
+applies no threshold — it consumes the feasibility and the geometry that produced it.
+This script owns every chemistry and geometry decision.
 
 Both subcommands print a single JSON line to stdout and exit 0 on success. Every
 assess result carries a `status` so the caller can tell "no warhead" apart from
@@ -59,6 +65,37 @@ TETHER_FORCE = 5.0      # kcal/mol/Å² restraint toward the docked position
 # A tethered ligand heavy atom closer than this to a receptor heavy atom (other than
 # the cysteine it bonds) is a steric clash, not a pose.
 CLASH_CUTOFF = 2.0
+
+# Covalent-competence geometry. Every chemistry/geometry decision lives here now; the Go
+# side applies no threshold and only consumes the feasibility we return.
+#
+# REACH_IDEAL is the Bondi S···C van der Waals contact distance (C 1.70 + S 1.80 =
+# 3.50 Å). In a NON-covalent dock the warhead carbon and SG are non-bonded spheres that
+# physically cannot approach closer, so this is the correct full-credit anchor for a
+# docked pose — not an arbitrary cutoff.
+REACH_IDEAL = 3.5
+# Beyond REACH_MAX the warhead is not covalently competent. Published covalent-docking
+# practice draws the line at < 4.0 Å S···electrophile; approved covalent drugs sit at
+# 2.98–3.78 Å in their co-crystals. The former 5.0 Å paid 25–50% credit at 4.0–5.0 Å,
+# a tail outside anything the literature calls competent.
+REACH_MAX = 4.0
+
+# A near-attack conformation needs a trajectory, not just a distance: a warhead can sit
+# 3.4 Å from SG with an orientation that makes attack geometrically impossible. Attack
+# on a trigonal (sp2) Michael acceptor follows the Bürgi–Dunitz angle (~105°); SN2
+# backside attack on a haloacetamide is collinear (~180°).
+ANGLE_IDEAL_SP2 = 105.0
+ANGLE_IDEAL_SN2 = 180.0
+# Within ANGLE_TOL_FULL of the ideal the trajectory is as good as ideal; past
+# ANGLE_TOL_ZERO the transition state is out of reach. Linear between the two.
+ANGLE_TOL_FULL = 15.0
+ANGLE_TOL_ZERO = 40.0
+
+# A docked mode whose affinity is worse than the best mode's by more than this is not a
+# pose the receptor binds, so its geometry must not earn covalent credit. This gate is
+# what stops an unguarded minimum over 20 modes × 5 seeds from rewarding conformational
+# promiscuity: a floppy ligand cannot buy reach with a pose the receptor never holds.
+MODE_ENERGY_WINDOW = 2.0
 
 # Cysteine-reactive warheads, most specific pattern first so the reported class is
 # the informative one. For EVERY pattern, match index 0 is the electrophilic carbon
@@ -190,22 +227,114 @@ def pose_modes(pose_path):
     return out
 
 
-def scan_reach(query, e_template_idx, mols, sg):
-    """Across all docked modes, return (min electrophile→SG distance, best mode mol,
-    its template→pose atom mapping), or (None, None, None) when no mode matched.
+def mode_affinities(pose_path):
+    """Per-mode Vina affinities (kcal/mol) in MODEL order, one per docked pose. Vina
+    writes them into the PDBQT as `REMARK VINA RESULT: <affinity> <rmsd_lb> <rmsd_ub>`,
+    one line per MODEL, so file order is MODEL order.
 
-    Symmetric molecules admit several mappings, so every one is tried and the closest
-    approach wins.
+    These gate out poses the receptor does not actually bind. The caller must NOT assume
+    this list aligns 1:1 with pose_modes() output — OpenBabel can silently drop a MODEL
+    on conversion — so it checks the counts before trusting the alignment.
     """
-    best = (None, None, None)
-    for m in mols:
+    out = []
+    with open(pose_path) as fh:
+        for line in fh:
+            if line.startswith("REMARK VINA RESULT:"):
+                fields = line.split(":", 1)[1].split()
+                if fields:
+                    try:
+                        out.append(float(fields[0]))
+                    except ValueError:
+                        pass
+    return out
+
+
+def angle_deg(a, b, c):
+    """Angle at vertex b (degrees) between the rays b→a and b→c. Returns 0.0 for a
+    degenerate (zero-length) ray rather than raising."""
+    v1 = (a[0] - b[0], a[1] - b[1], a[2] - b[2])
+    v2 = (c[0] - b[0], c[1] - b[1], c[2] - b[2])
+    n1 = math.sqrt(v1[0] ** 2 + v1[1] ** 2 + v1[2] ** 2)
+    n2 = math.sqrt(v2[0] ** 2 + v2[1] ** 2 + v2[2] ** 2)
+    if n1 == 0.0 or n2 == 0.0:
+        return 0.0
+    cos = (v1[0] * v2[0] + v1[1] * v2[1] + v1[2] * v2[2]) / (n1 * n2)
+    return math.degrees(math.acos(max(-1.0, min(1.0, cos))))
+
+
+def distance_score(reach):
+    """Reach → [0,1]: full credit at the Bondi vdW contact (≤ REACH_IDEAL), linearly
+    down to 0 at REACH_MAX, 0 beyond. A closer-than-contact pose cannot do better than
+    contact, so the score saturates rather than rewarding overlap."""
+    if reach <= REACH_IDEAL:
+        return 1.0
+    if reach >= REACH_MAX:
+        return 0.0
+    return (REACH_MAX - reach) / (REACH_MAX - REACH_IDEAL)
+
+
+def angle_score(angle, ideal):
+    """Attack angle → [0,1]: full credit within ANGLE_TOL_FULL of the ideal trajectory,
+    linearly down to 0 at ANGLE_TOL_ZERO, 0 beyond. Deviation is symmetric about the
+    ideal, so a too-shallow and a too-steep approach are penalised alike."""
+    dev = abs(angle - ideal)
+    if dev <= ANGLE_TOL_FULL:
+        return 1.0
+    if dev >= ANGLE_TOL_ZERO:
+        return 0.0
+    return (ANGLE_TOL_ZERO - dev) / (ANGLE_TOL_ZERO - ANGLE_TOL_FULL)
+
+
+def scan_geometry(query, tidx, mech, mols, sg, affinities):
+    """Score the covalent near-attack geometry across the docked modes and return the
+    SINGLE most feasible pose as a dict {reach, angle, feasibility, mode_rank,
+    mode_affinity, mol, match}, plus a note string, or (None, note) when no mode could
+    be mapped to the ligand.
+
+    Only modes the receptor actually binds contribute geometry: with `affinities` given,
+    a mode more than MODE_ENERGY_WINDOW above the best affinity is dropped, so reach
+    cannot be bought with a high-energy pose. When `affinities` is None (the count could
+    not be aligned to the molecules) the gate is skipped and mode_affinity is unknown.
+
+    Feasibility = distance_score × angle_score, and the pose with the HIGHEST
+    feasibility wins — not the smallest distance. Minimum-over-samples is the
+    downward-biased estimator we are removing; feasibility gates on both reach and
+    trajectory, so it cannot be won by a floppy ligand sampling many orientations.
+
+    `tidx[0]` is the electrophilic carbon (attack vertex); `tidx[1]` is the α-carbon
+    (michael/michael_yne) or leaving halogen (sn2). Symmetric molecules admit several
+    atom mappings, so every one is scored.
+    """
+    note = ""
+    if affinities is not None:
+        cutoff = min(affinities) + MODE_ENERGY_WINDOW
+        candidates = [i for i, a in enumerate(affinities) if a <= cutoff]
+        if not candidates:
+            # The window admits the best mode by construction, so an empty set can only
+            # come from degenerate affinities — fall back to the best-affinity mode.
+            candidates = [min(range(len(affinities)), key=lambda i: affinities[i])]
+            note = "energy window admitted no mode; fell back to best-affinity mode"
+    else:
+        candidates = list(range(len(mols)))
+
+    ideal = ANGLE_IDEAL_SN2 if mech == "sn2" else ANGLE_IDEAL_SP2
+    best = None
+    for i in candidates:
+        m = mols[i]
         conf = m.GetConformer()
         for match in m.GetSubstructMatches(query):
-            p = conf.GetAtomPosition(match[e_template_idx])
-            d = math.dist((p.x, p.y, p.z), sg)
-            if best[0] is None or d < best[0]:
-                best = (d, m, match)
-    return best
+            e = conf.GetAtomPosition(match[tidx[0]])
+            s = conf.GetAtomPosition(match[tidx[1]])
+            e_xyz = (e.x, e.y, e.z)
+            reach = math.dist(e_xyz, sg)
+            angle = angle_deg(sg, e_xyz, (s.x, s.y, s.z))
+            feas = distance_score(reach) * angle_score(angle, ideal)
+            if best is None or feas > best["feasibility"]:
+                best = {"reach": reach, "angle": angle, "feasibility": feas,
+                        "mode_rank": i + 1,
+                        "mode_affinity": affinities[i] if affinities is not None else 0.0,
+                        "mol": m, "match": match}
+    return best, note
 
 
 def template_on_pose(template, mol, match):
@@ -357,9 +486,14 @@ def cmd_assess(args):
         return 1
 
     name, mech, tidx = detect_warhead(template)
+    # Every emission carries the full contract at its default so the Go side never has to
+    # distinguish "field absent" from "value unknown". feasibility/reach stay null until
+    # a real measurement; the rest default to the "unknown" sentinels the struct expects.
     result = {"has_warhead": name is not None, "warhead_type": name or "",
-              "status": ST_NO_WARHEAD, "reach_distance": None,
-              "bond_distance": 0.0, "tether_written": False}
+              "status": ST_NO_WARHEAD, "feasibility": None, "reach_distance": None,
+              "attack_angle": 0.0, "mode_rank": 0, "mode_affinity": 0.0,
+              "modes_read": 0, "bond_distance": 0.0, "tether_rmsd": 0.0,
+              "min_contact": 0.0, "tether_written": False}
     if name is None:
         print(json.dumps(result))
         return 0
@@ -371,29 +505,52 @@ def cmd_assess(args):
         return 0
 
     mols = pose_modes(args.pose)
-    reach, best, match = scan_reach(pose_query(template), tidx[0], mols, cys["SG"])
-    if reach is None:
+    result["modes_read"] = len(mols)
+
+    # The energy gate keeps geometry from off-energy poses out of the score. It needs a
+    # 1:1 alignment between the parsed affinities and the molecules, but OpenBabel can
+    # drop a MODEL on conversion; if the counts disagree we refuse to guess which
+    # affinity belongs to which pose and run ungated rather than credit the wrong energy.
+    notes = []
+    affinities = mode_affinities(args.pose)
+    if mols and len(affinities) == len(mols):
+        result["energy_gate"] = True
+        gate_affs = affinities
+    else:
+        result["energy_gate"] = False
+        gate_affs = None
+        if mols:
+            notes.append(f"affinity/mol count mismatch "
+                         f"({len(affinities)} vs {len(mols)}); energy gate skipped")
+
+    geom, gnote = scan_geometry(pose_query(template), tidx, mech, mols,
+                                cys["SG"], gate_affs)
+    if gnote:
+        notes.append(gnote)
+    if notes:
+        result["note"] = "; ".join(notes)
+
+    if geom is None:
         # The pose exists but nothing in it could be mapped to the ligand. This is a
         # broken measurement, not a molecule that fails to reach — say so.
         result["status"] = ST_UNREADABLE
-        result["modes_read"] = len(mols)
         print(json.dumps(result))
         return 0
 
     result["status"] = ST_MEASURED
-    result["reach_distance"] = round(reach, 3)
-    result["modes_read"] = len(mols)
+    result["feasibility"] = round(geom["feasibility"], 3)
+    result["reach_distance"] = round(geom["reach"], 3)
+    result["attack_angle"] = round(geom["angle"], 1)
+    result["mode_rank"] = geom["mode_rank"]
+    result["mode_affinity"] = round(geom["mode_affinity"], 3)
 
-    # Only build the tether for a warhead that actually reaches; forcing a bond onto
-    # a pose 7 Å away yields a distorted pose that the bond/clash checks would reject
-    # anyway.
-    want_tether = args.tether_out and cys["CA"] and cys["CB"]
-    if want_tether and args.tether_max_reach > 0 and reach > args.tether_max_reach:
-        want_tether = False
-    if want_tether:
+    # The script — not the caller — decides when to tether: build it ONLY when the
+    # warhead can actually attack (feasibility > 0). Forcing a bond onto an infeasible
+    # pose yields a distorted structure the bond/clash checks would reject anyway.
+    if args.tether_out and geom["feasibility"] > 0 and cys["CA"] and cys["CB"]:
         try:
             rec = receptor_heavy_atoms(args.receptor, args.chain, args.resnum)
-            posed = template_on_pose(template, best, match)
+            posed = template_on_pose(template, geom["mol"], geom["match"])
             info = build_tether(posed, tidx, mech, cys, rec, args.tether_out)
             result.update(info)
             result["tether_written"] = True
@@ -419,8 +576,6 @@ def main():
     a.add_argument("--chain", required=True)
     a.add_argument("--resnum", required=True, type=int)
     a.add_argument("--tether-out", default="", help="write the tethered pose here")
-    a.add_argument("--tether-max-reach", type=float, default=0.0,
-                   help="skip the tether when reach exceeds this (Å); 0 disables")
     a.set_defaults(func=cmd_assess)
 
     args = ap.parse_args()

@@ -1,4 +1,4 @@
-import { isCovalentCredited, type Ranking } from '../../lib/api'
+import { isCovalentFeasible, type Ranking } from '../../lib/api'
 import CovalentBadge from './CovalentBadge'
 
 type Props = {
@@ -36,6 +36,12 @@ function selTone(x: number): string {
 export default function SelectivityBoard({ ranking, status, error, activeSmiles, onSelect }: Props) {
   const rows = ranking?.ranked ?? []
   const best = rows[0]?.scores.selectivity
+  // On a covalent target the non-covalent margin is ~0 by design (Gly12→Cys12 barely
+  // moves reversible binding), so selectivity stops being the ranking signal and must
+  // read as secondary; feasibility carries the discrimination instead.
+  const covalentRun = rows.some((m) => m.scores.covalent != null)
+  const selectivityNote =
+    'For a covalent target the non-covalent margin is expected to be ~0: Gly12→Cys12 barely perturbs reversible binding, so WT and mutant Vina scores agree. The covalent evidence is the feasibility, not this number.'
 
   return (
     <section className="flex flex-col">
@@ -95,16 +101,16 @@ export default function SelectivityBoard({ ranking, status, error, activeSmiles,
                       <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted">
                         <span className="tabular-nums">wt {m.scores.wt_score.toFixed(1)}</span>
                         <span className="tabular-nums">mut {m.scores.mutant_score.toFixed(1)}</span>
-                        {m.scores.covalent && isCovalentCredited(m.scores.covalent) && (
+                        {m.scores.covalent && isCovalentFeasible(m.scores.covalent) && (
                           <span
-                            className={`tabular-nums ${m.scores.covalent.uncertain ? 'text-muted' : 'text-accent'}`}
+                            className="tabular-nums text-muted"
                             title={
                               m.scores.covalent.uncertain
-                                ? 'this credit flips with the docking seed — indistinguishable, not a rank'
-                                : 'covalent bond credit applied to the mutant score'
+                                ? 'covalent feasibility (0–1) — but this call flips with the docking seed, so treat it as indistinguishable, not a rank'
+                                : 'covalent feasibility (0–1): geometric plausibility that the warhead bonds the thiol. Dimensionless — not an energy.'
                             }
                           >
-                            +{m.scores.covalent.credit.toFixed(1)} cov{m.scores.covalent.uncertain ? '?' : ''}
+                            feas {m.scores.covalent.feasibility.toFixed(2)}{m.scores.covalent.uncertain ? '?' : ''}
                           </span>
                         )}
                         {m.scores.qed != null && (
@@ -113,11 +119,22 @@ export default function SelectivityBoard({ ranking, status, error, activeSmiles,
                       </div>
                     </div>
 
-                    <div className="flex flex-none flex-col items-end">
-                      <span className={`text-sm tabular-nums ${selTone(m.scores.selectivity)}`}>
+                    <div
+                      className="flex flex-none flex-col items-end"
+                      title={covalentRun ? selectivityNote : undefined}
+                    >
+                      <span
+                        className={
+                          covalentRun
+                            ? 'text-xs tabular-nums text-muted'
+                            : `text-sm tabular-nums ${selTone(m.scores.selectivity)}`
+                        }
+                      >
                         {signedSel(m.scores.selectivity)}
                       </span>
-                      <span className="text-xs text-muted">selectivity</span>
+                      <span className={covalentRun ? 'text-[10px] text-muted/80' : 'text-xs text-muted'}>
+                        selectivity
+                      </span>
                     </div>
                   </div>
                 </li>
@@ -126,15 +143,22 @@ export default function SelectivityBoard({ ranking, status, error, activeSmiles,
           </ul>
 
           <div className="flex items-center justify-between border-t border-hairline px-3 py-2 text-xs text-muted">
-            <span>
-              {ranking?.normalization ?? 'zscore'} · weights{' '}
+            {/* Name each weight rather than printing a bare ratio: on a covalent run the
+                feasibility term carries most of the ranking, and an unlabelled triple that
+                silently omits it reads as if selectivity were still doing the work. */}
+            <span title="fitness = w·potency + w·selectivity + w·drug-likeness + w·covalent feasibility, each pool-normalised">
+              {ranking?.normalization ?? 'zscore'} ·{' '}
               {ranking
-                ? `${ranking.weights.selectivity}/${ranking.weights.potency}/${ranking.weights.drug_likeness}`
+                ? `pot ${ranking.weights.potency} · sel ${ranking.weights.selectivity} · qed ${ranking.weights.drug_likeness}` +
+                  (ranking.weights.covalent_feasibility
+                    ? ` · feas ${ranking.weights.covalent_feasibility}`
+                    : '')
                 : '—'}
             </span>
             {best != null && (
-              <span>
-                Best <span className={selTone(best)}>{signedSel(best)}</span>
+              <span title={covalentRun ? selectivityNote : undefined}>
+                Best selectivity{' '}
+                <span className={covalentRun ? 'text-muted' : selTone(best)}>{signedSel(best)}</span>
               </span>
             )}
           </div>

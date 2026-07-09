@@ -1,4 +1,4 @@
-import { isCovalentCredited, type CovalentDock } from '../../lib/api'
+import { isCovalentFeasible, type CovalentDock } from '../../lib/api'
 
 /** Human label for a warhead class, e.g. "vinyl_sulfonamide" → "vinyl sulfonamide". */
 function warheadLabel(type: string | undefined): string {
@@ -13,52 +13,74 @@ function reachPhrase(c: CovalentDock): string {
   return `${r} Å (median of ${c.replicates} seeds${sp})`
 }
 
-/** A full-sentence explanation of the covalent model, used as a tooltip. */
+/** "attack angle 104°" — the approach at the electrophilic carbon; omitted if unmeasured. */
+function anglePhrase(c: CovalentDock): string | null {
+  return c.attack_angle != null ? `attack angle ${Math.round(c.attack_angle)}°` : null
+}
+
+/** "geometry from Vina mode 2 (−7.3 kcal/mol)" — which bound pose the reach was read off. */
+function modePhrase(c: CovalentDock): string | null {
+  if (!c.mode_rank) return null
+  // This kcal/mol is the receptor's own Vina affinity for the pose, not a covalent
+  // energy — the covalent term is kinetic and has no ΔG, so it is never printed here.
+  const aff = c.mode_affinity != null ? ` (${c.mode_affinity.toFixed(1)} kcal/mol)` : ''
+  return `geometry from Vina mode ${c.mode_rank}${aff}`
+}
+
+/** A full-sentence explanation of the covalent geometry verdict, used as a tooltip. */
 export function covalentTitle(c: CovalentDock): string {
   const warhead = warheadLabel(c.warhead_type)
-  const raw = `raw mutant ${c.non_covalent_score.toFixed(1)}`
   const shaky = c.uncertain
-    ? ' — WARNING: some docking seeds place the warhead in bonding range and others do not, so this credit is decided by the RNG. Treat as indistinguishable, not as a rank.'
+    ? ' — WARNING: some docking seeds place the warhead where it can attack and others do not, so this call is decided by the RNG. Treat as indistinguishable, not as a rank.'
     : ''
 
   switch (c.status) {
     case 'tethered':
-    case 'in_reach': {
+    case 'feasible': {
       const parts = [
-        `Covalent tether to ${c.target_residue}`,
-        `${warhead} warhead reaches the thiol at ${reachPhrase(c)}`,
-        `+${c.credit.toFixed(2)} kcal/mol bond credit (${raw})`,
+        `Covalent feasibility ${c.feasibility.toFixed(2)} — ${warhead} warhead can attack ${c.target_residue}`,
+        `reach ${reachPhrase(c)}`,
       ]
+      const angle = anglePhrase(c)
+      if (angle) parts.push(angle)
+      const mode = modePhrase(c)
+      if (mode) parts.push(mode)
       if (c.status === 'tethered' && c.bond_distance) {
         parts.push(`tethered S–C ${c.bond_distance.toFixed(2)} Å`)
-      } else {
-        parts.push('no valid tethered pose was built, so the docked pose is shown')
+      } else if (c.status === 'feasible') {
+        parts.push('no valid adduct pose was built, so the docked pose is shown')
       }
       return parts.join(' · ') + shaky
     }
-    case 'out_of_reach':
-      return [
-        `${warhead} warhead, but it cannot reach ${c.target_residue}`,
-        `closest approach ${reachPhrase(c)}`,
-        `no covalent credit applied (${raw})`,
-      ].join(' · ') + shaky
+    case 'infeasible': {
+      // Report both the reach ("too far") and the angle ("wrong attack angle") so the
+      // reader can see which one killed the bond.
+      const parts = [`${warhead} warhead cannot attack ${c.target_residue}`]
+      if (c.reach_distance != null) parts.push(`closest approach ${reachPhrase(c)}`)
+      const angle = anglePhrase(c)
+      if (angle) parts.push(`${angle} off the ideal trajectory`)
+      const mode = modePhrase(c)
+      if (mode) parts.push(mode)
+      return parts.join(' · ') + shaky
+    }
     case 'unreadable_pose':
-      return `${warhead} warhead, but the docked pose could not be mapped onto the ligand, so its reach to ${c.target_residue} is unknown — this is a failed measurement, not a negative result${c.note ? ` (${c.note})` : ''}`
+      return `${warhead} warhead, but the docked pose could not be mapped onto the ligand, so its reach to ${c.target_residue} is unknown — a failed measurement, not a negative result${c.note ? ` (${c.note})` : ''}`
     case 'assess_failed':
-      return `Covalent assessment failed${c.note ? `: ${c.note}` : ''} — the mutant score is non-covalent`
+      return `Covalent assessment failed${c.note ? `: ${c.note}` : ''} — the warhead's reach to the thiol could not be checked`
     case 'no_thiol':
       return `${c.target_residue} carries no thiol, so a ${warhead} warhead cannot bond it`
   }
 }
 
 /**
- * A compact pill describing what the covalent model concluded for this molecule.
+ * A compact pill describing the covalent geometry verdict for this molecule.
  *
- * A credited binder tethers to the mutated cysteine, which the wild type (no thiol)
- * cannot do — that is real selectivity rather than the docking noise a non-covalent
- * score shows. But a warhead that never reaches the thiol, and a warhead whose reach
- * could not be measured, must not wear the same badge: reporting them as "covalent"
- * is how a broken measurement passes for a result.
+ * A feasible warhead can attack the mutated cysteine's thiol, which the wild type
+ * (Gly12, no thiol) cannot offer at all — that is where a covalent inhibitor's
+ * selectivity comes from, and non-covalent docking is blind to it. But a warhead that
+ * cannot reach or is at the wrong angle, and a warhead whose geometry could not be
+ * read, must not wear the same badge: showing them as "covalent" is how a broken
+ * measurement passes for a result. The pill reports feasibility (0–1), never an energy.
  */
 export default function CovalentBadge({
   covalent,
@@ -67,20 +89,33 @@ export default function CovalentBadge({
   covalent: CovalentDock
   className?: string
 }) {
-  const credited = isCovalentCredited(covalent)
+  const feasible = isCovalentFeasible(covalent)
   const failed = covalent.status === 'unreadable_pose' || covalent.status === 'assess_failed'
-  // A credit that flips with the seed must not look as confident as one that holds.
+  // A call that flips with the seed is a coin flip — it must not look as confident as
+  // one that holds, so seed-dependent styling wins over the feasible accent pill.
   const shaky = covalent.uncertain === true
 
   const tone = shaky
     ? 'bg-paper-deep text-muted ring-1 ring-inset ring-conf-verylow/40'
-    : credited
+    : feasible
       ? 'bg-accent-soft text-accent'
       : failed
         ? 'bg-paper-deep text-conf-verylow'
         : 'bg-paper-deep text-muted'
 
-  const label = shaky ? 'seed-dependent' : credited ? 'covalent' : failed ? 'not assessed' : 'no reach'
+  // "no attack" (not "no reach"): an infeasible warhead may be in range but approaching
+  // the electrophilic carbon at an impossible angle.
+  const label = shaky
+    ? 'seed-dependent'
+    : feasible
+      ? 'covalent'
+      : failed
+        ? 'not assessed'
+        : covalent.status === 'infeasible'
+          ? 'no attack'
+          : 'no thiol'
+
+  const accent = feasible && !shaky
 
   return (
     <span
@@ -91,9 +126,12 @@ export default function CovalentBadge({
       <span aria-hidden="true">⬡</span>
       <span>{label}</span>
       {covalent.warhead_type && (
-        <span className={credited && !shaky ? 'text-accent/70' : 'opacity-70'}>
+        <span className={accent ? 'text-accent/70' : 'opacity-70'}>
           · {warheadLabel(covalent.warhead_type)}
         </span>
+      )}
+      {accent && (
+        <span className="tabular-nums text-accent/70">· {covalent.feasibility.toFixed(2)}</span>
       )}
     </span>
   )
