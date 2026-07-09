@@ -91,9 +91,16 @@ export function useMolstar({
   // True while a pocket highlight is active, so click-to-clear behavior doesn't
   // wipe the persistent selection out from under it.
   const pocketActiveRef = useRef(false)
-  // The hierarchy StructureRef of the current pose overlay, so it can be removed
-  // and skipped by receptor-wide recoloring/restyling.
+  // The hierarchy StructureRef of the current pose overlay, so it can be
+  // skipped by receptor-wide recoloring/restyling.
   const poseStructRef = useRef<any>(null)
+  // The transform ref of the receptor structure. Pose removal targets every
+  // OTHER structure rather than a single per-pose ref, so a stale or
+  // mis-captured pose ref can never leave an old pose stranded in the scene.
+  const receptorRefId = useRef<string | undefined>(undefined)
+  // Monotonic counter that lets an in-flight setPose notice it has been
+  // superseded — e.g. clicking through ranking rows faster than poses build.
+  const poseSeqRef = useRef(0)
 
   // Initialize the plugin once, on mount.
   useEffect(() => {
@@ -229,8 +236,9 @@ export function useMolstar({
     setError(null)
     try {
       await plugin.clear()
-      // clear() drops the pose overlay too, so the stale ref is gone.
+      // clear() drops the pose overlay too, so the stale refs are gone.
       poseStructRef.current = null
+      receptorRefId.current = undefined
 
       // Mol* fetches the file itself from the remote URL — no local download.
       const data = await plugin.builders.data.download(
@@ -246,6 +254,12 @@ export function useMolstar({
       await plugin.builders.structure.hierarchy.applyPreset(trajectory, 'default', {
         representationPreset: 'auto',
       })
+
+      // Right after the preset the receptor is the only structure in the scene;
+      // remember its ref so pose overlays (added later) are the ONLY things
+      // pose removal ever touches.
+      const loaded = plugin.managers.structure.hierarchy.current.structures ?? []
+      receptorRefId.current = loaded[loaded.length - 1]?.cell?.transform?.ref
 
       await applyPlddtColoring(plugin)
       if (representation !== 'cartoon') await updateRepresentation(plugin, representation)
@@ -309,24 +323,44 @@ export function useMolstar({
   }
 
   /**
-   * Overlay a docked ligand pose from raw PDB text on top of the protein, or
-   * remove the current one when `poseString` is empty. The pose is loaded via a
-   * Blob object URL (no network fetch) and drawn as red spheres wrapped in a
-   * translucent yellow halo. The camera is left where it is. Its hierarchy ref
-   * is stashed so it can be removed and skipped by receptor recoloring.
+   * Remove every structure that isn't the receptor — i.e. any docked-pose
+   * overlay(s). Removing by "not the receptor" (rather than a single tracked
+   * pose ref) means a stale or wrongly-captured ref can never strand an old
+   * pose in the scene, so at most one pose is ever visible.
    */
-  async function setPose(plugin: any, poseString: string | null | undefined) {
-    // Remove any existing pose first so at most one is in the scene.
-    if (poseStructRef.current) {
+  async function removePoses(plugin: any) {
+    const current = plugin.managers.structure.hierarchy.current.structures ?? []
+    const stale = current.filter((s: any) => {
+      const ref = s?.cell?.transform?.ref
+      return ref && ref !== receptorRefId.current
+    })
+    if (stale.length > 0) {
       try {
-        await plugin.managers.structure.hierarchy.remove([poseStructRef.current])
+        await plugin.managers.structure.hierarchy.remove(stale)
       } catch (err) {
         console.warn('[useMolstar] pose removal failed:', err)
       }
-      poseStructRef.current = null
     }
+    poseStructRef.current = null
+  }
 
-    if (!poseString) return
+  /**
+   * Overlay a docked ligand pose from raw PDB text on top of the protein, or
+   * remove the current one when `poseString` is empty. The pose is loaded via a
+   * Blob object URL (no network fetch) and drawn as red spheres wrapped in a
+   * translucent yellow halo. Any previous pose is removed first, so exactly one
+   * pose is ever shown. The camera is left where it is.
+   */
+  async function setPose(plugin: any, poseString: string | null | undefined) {
+    // Claim this call's turn. A later setPose bumps the counter, so an older
+    // one that's still awaiting an async builder can detect it's been
+    // superseded and clean up after itself instead of leaving two poses.
+    const seq = ++poseSeqRef.current
+
+    // Drop any existing pose first so at most one is in the scene.
+    await removePoses(plugin)
+
+    if (!poseString || seq !== poseSeqRef.current) return
 
     const url = URL.createObjectURL(new Blob([poseString], { type: 'text/plain' }))
     try {
@@ -362,8 +396,17 @@ export function useMolstar({
         })
       }
 
-      // Sync the hierarchy, then record the newly added structure as the pose.
+      // Sync the hierarchy so the new structure is visible to the managers.
       plugin.managers.structure.hierarchy.sync(true)
+
+      // A newer setPose landed while this one was building its pose — discard
+      // what we just added so only the newest pose survives.
+      if (seq !== poseSeqRef.current) {
+        await removePoses(plugin)
+        return
+      }
+
+      // Record the newly added structure as the current pose overlay.
       const structures = plugin.managers.structure.hierarchy.current.structures
       poseStructRef.current = structures[structures.length - 1] ?? null
     } catch (err) {
