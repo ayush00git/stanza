@@ -28,6 +28,7 @@ type createRunBody struct {
 	UniprotID string `json:"uniprot_id"`
 	Mutation  string `json:"mutation"`
 	SiteHint  string `json:"site_hint"`
+	ProfileID string `json:"profile_id"`
 }
 
 // CreateRunHandler handles POST /runs. It parses the mutation, runs Stage-1
@@ -62,6 +63,7 @@ func CreateRunHandler(c *gin.Context) {
 
 	run := &models.Run{
 		ID:        uuid.NewString(),
+		ProfileID: strings.TrimSpace(body.ProfileID),
 		UniprotID: uniprotID,
 		Mutation:  mutation,
 		SiteHint:  strings.TrimSpace(body.SiteHint),
@@ -76,6 +78,7 @@ func CreateRunHandler(c *gin.Context) {
 		run.Status = "error"
 		run.Error = err.Error()
 		DefaultRunStore.Put(run)
+		persistRun(c.Request.Context(), run)
 		c.JSON(http.StatusCreated, run)
 		return
 	}
@@ -93,6 +96,7 @@ func CreateRunHandler(c *gin.Context) {
 	}
 
 	DefaultRunStore.Put(run)
+	persistRun(c.Request.Context(), run)
 	c.JSON(http.StatusCreated, run)
 }
 
@@ -149,6 +153,7 @@ func GetRunPocketsHandler(c *gin.Context) {
 	run.Pockets = pa
 	genMu.Unlock()
 	DefaultRunStore.Put(run)
+	persistRun(c.Request.Context(), run)
 	c.JSON(http.StatusOK, pa)
 }
 
@@ -221,6 +226,7 @@ func DockRunHandler(c *gin.Context) {
 	run.Docks = append(run.Docks, *res)
 	genMu.Unlock()
 	DefaultRunStore.Put(run)
+	persistRun(c.Request.Context(), run)
 	c.JSON(http.StatusCreated, res)
 }
 
@@ -312,6 +318,7 @@ func GenerateRunHandler(c *gin.Context) {
 		return
 	}
 	DefaultRunStore.Put(run)
+	persistRun(c.Request.Context(), run)
 
 	if candidates == nil {
 		candidates = []models.Candidate{}
@@ -338,7 +345,21 @@ func GetRunHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, &snap)
 }
 
-// ListRunsHandler handles GET /runs, returning all runs newest-first.
+// ListRunsHandler handles GET /runs, returning all runs newest-first. An optional
+// ?profile_id= filter narrows the list to runs owned by that researcher profile.
 func ListRunsHandler(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"runs": DefaultRunStore.List()})
+	runs := DefaultRunStore.List()
+	if profileID := strings.TrimSpace(c.Query("profile_id")); profileID != "" {
+		filtered := make([]*models.Run, 0, len(runs))
+		for _, run := range runs {
+			if run.ProfileID == profileID {
+				filtered = append(filtered, run)
+			}
+		}
+		runs = filtered
+	}
+	if runs == nil {
+		runs = []*models.Run{}
+	}
+	c.JSON(http.StatusOK, gin.H{"runs": runs})
 }

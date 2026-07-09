@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import { useActiveProfile } from '../lib/profile'
 
 const links = [
   { label: 'Search', href: '#search' },
@@ -7,6 +8,8 @@ const links = [
 ]
 
 export default function Navbar() {
+  const profile = useActiveProfile()
+
   return (
     <header className="sticky top-0 z-50 border-b border-hairline bg-paper/85 backdrop-blur-sm">
       <nav className="mx-auto flex max-w-5xl items-center justify-between px-6 py-4">
@@ -33,6 +36,23 @@ export default function Navbar() {
             <Link to="/runs" className="text-sm text-muted transition-colors hover:text-ink">
               Resistance
             </Link>
+          </li>
+          <li>
+            {profile ? (
+              <Link
+                to="/profile"
+                className="rounded-full border border-hairline bg-paper px-2.5 py-0.5 text-sm text-ink transition-colors hover:border-[var(--color-accent)] hover:text-accent"
+              >
+                👤 {profile.name}
+              </Link>
+            ) : (
+              <Link
+                to="/profile"
+                className="text-sm text-muted transition-colors hover:text-ink"
+              >
+                Create profile
+              </Link>
+            )}
           </li>
         </ul>
 

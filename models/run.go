@@ -92,6 +92,7 @@ type Candidate struct {
 // Run is a resistance-design run. Stage 1 populates WTStructure.
 type Run struct {
 	ID          string             `json:"id"`
+	ProfileID   string             `json:"profile_id,omitempty"` // owning researcher profile (Stage 8); "" if anonymous
 	UniprotID   string             `json:"uniprot_id"`
 	Mutation    Mutation           `json:"mutation"`
 	SiteHint    string             `json:"site_hint,omitempty"`

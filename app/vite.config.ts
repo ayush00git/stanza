@@ -16,6 +16,9 @@ export default defineConfig({
       '/complex': apiTarget,
       '/chembl': apiTarget,
       '/dock': apiTarget,
+      // /profiles is API-only; the SPA route is /profile (singular), so a plain
+      // proxy is fine — no browser navigations land on /profiles.
+      '/profiles': apiTarget,
       // /runs is BOTH an API prefix and the SPA route prefix (/runs, /runs/:id).
       // Serve the app for browser navigations (Accept: text/html) so a reload of
       // /runs/:id loads the viewer; proxy fetch()/XHR (Accept: */*) to the API.

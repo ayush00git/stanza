@@ -560,7 +560,12 @@ export function runStructureUrl(id: string, track: 'wt' | 'mutant'): string {
 
 /** Create a resistance-design run (Stage 1–2 run synchronously server-side). Wraps POST /runs. */
 export async function createRun(
-  body: { uniprot_id: string; mutation: string; site_hint?: string },
+  body: {
+    uniprot_id: string
+    mutation: string
+    site_hint?: string
+    profile_id?: string
+  },
   signal?: AbortSignal,
 ): Promise<Run> {
   const res = await fetch('/runs', {
@@ -576,6 +581,20 @@ export async function createRun(
 /** List all runs, newest-first. Wraps GET /runs. */
 export async function listRuns(signal?: AbortSignal): Promise<Run[]> {
   const res = await fetch('/runs', { signal })
+  if (!res.ok) throw new Error(await errorMessage(res, 'Could not list runs'))
+  const body = (await res.json()) as { runs: Run[] | null }
+  return body.runs ?? []
+}
+
+/** List the runs linked to one profile, newest-first. Wraps GET /runs?profile_id=<id>. */
+export async function listRunsByProfile(
+  profileId: string,
+  signal?: AbortSignal,
+): Promise<Run[]> {
+  const res = await fetch(
+    `/runs?profile_id=${encodeURIComponent(profileId)}`,
+    { signal },
+  )
   if (!res.ok) throw new Error(await errorMessage(res, 'Could not list runs'))
   const body = (await res.json()) as { runs: Run[] | null }
   return body.runs ?? []
@@ -671,4 +690,65 @@ export async function getRunRanking(
   )
   if (!res.ok) throw new Error(await errorMessage(res, 'Ranking failed'))
   return (await res.json()) as Ranking
+}
+
+/* ────────────────────────────────────────────────────────────────────────
+   Researcher profiles (the `/profiles` flow)
+
+   Auth is intentionally minimal: a profile just lets someone track their run
+   history. There's no validation or verification. Mirrors models.Profile.
+   ──────────────────────────────────────────────────────────────────────── */
+
+/** A researcher profile. Mirrors models.Profile (JSON tags). */
+export type Profile = {
+  id: string
+  name: string
+  email?: string
+  institution?: string
+  field?: string
+  orcid?: string
+  created_at: string
+}
+
+/**
+ * Create a researcher profile. Only `name` is required. Wraps POST /profiles.
+ * When the server has no database configured this responds 503 — the thrown
+ * error carries that message so callers can surface it.
+ */
+export async function createProfile(
+  body: {
+    name: string
+    email?: string
+    institution?: string
+    field?: string
+    orcid?: string
+  },
+  signal?: AbortSignal,
+): Promise<Profile> {
+  const res = await fetch('/profiles', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    signal,
+  })
+  if (!res.ok) throw new Error(await errorMessage(res, 'Could not create profile'))
+  return (await res.json()) as Profile
+}
+
+/** List all profiles, newest-first (empty when there's no database). Wraps GET /profiles. */
+export async function listProfiles(signal?: AbortSignal): Promise<Profile[]> {
+  const res = await fetch('/profiles', { signal })
+  if (!res.ok) throw new Error(await errorMessage(res, 'Could not list profiles'))
+  const body = (await res.json()) as { profiles: Profile[] | null }
+  return body.profiles ?? []
+}
+
+/** Fetch one profile. Wraps GET /profiles/:id. */
+export async function getProfile(
+  id: string,
+  signal?: AbortSignal,
+): Promise<Profile> {
+  const res = await fetch(`/profiles/${encodeURIComponent(id)}`, { signal })
+  if (!res.ok) throw new Error(await errorMessage(res, 'Profile not found'))
+  return (await res.json()) as Profile
 }

@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { createRun, listRuns, type Run } from '../lib/api'
+import { createRun, listRuns, listRunsByProfile, type Run } from '../lib/api'
+import { useActiveProfile } from '../lib/profile'
 
 type ListStatus = 'loading' | 'done' | 'error'
 
@@ -25,6 +26,7 @@ function shortDate(ts: string): string {
  */
 export default function RunsPage() {
   const navigate = useNavigate()
+  const active = useActiveProfile()
 
   const [uniprot, setUniprot] = useState('')
   const [mutation, setMutation] = useState('')
@@ -36,7 +38,10 @@ export default function RunsPage() {
 
   useEffect(() => {
     const ctrl = new AbortController()
-    listRuns(ctrl.signal)
+    setStatus('loading')
+    // Scope the list to the active profile when there is one; otherwise show all.
+    const load = active ? listRunsByProfile(active.id, ctrl.signal) : listRuns(ctrl.signal)
+    load
       .then((r) => {
         setRuns(r)
         setStatus('done')
@@ -45,7 +50,7 @@ export default function RunsPage() {
         if (!ctrl.signal.aborted) setStatus('error')
       })
     return () => ctrl.abort()
-  }, [])
+  }, [active])
 
   const submit = (e: FormEvent) => {
     e.preventDefault()
@@ -54,7 +59,7 @@ export default function RunsPage() {
     if (!uid || !mut || creating) return
     setCreating(true)
     setCreateError(null)
-    createRun({ uniprot_id: uid, mutation: mut })
+    createRun({ uniprot_id: uid, mutation: mut, profile_id: active?.id })
       .then((run) => {
         // Stage-1 acquisition can fail while still returning the run (status
         // "error"); surface that here rather than opening an empty viewer.
@@ -158,7 +163,18 @@ export default function RunsPage() {
 
         {/* Recent runs */}
         <section>
-          <h2 className="mb-4 font-display text-base font-medium text-ink">Recent runs</h2>
+          <div className="mb-4">
+            <h2 className="font-display text-base font-medium text-ink">Recent runs</h2>
+            {active && (
+              <p className="mt-1 text-xs text-muted">
+                Showing runs for{' '}
+                <Link to="/profile" className="text-accent hover:underline">
+                  {active.name}
+                </Link>
+                .
+              </p>
+            )}
+          </div>
 
           {status === 'error' ? (
             <p className="text-sm text-conf-verylow">Could not load runs.</p>

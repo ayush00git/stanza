@@ -2,6 +2,7 @@ import { lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import Home from './pages/Home'
 import RunsPage from './pages/RunsPage'
+import ProfilePage from './pages/ProfilePage'
 import { SearchProvider } from './lib/searchStore'
 
 // The structure page pulls in Mol* (~3.3 MB), so it's lazy-loaded — the home
@@ -19,6 +20,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/runs" element={<RunsPage />} />
+          <Route path="/profile" element={<ProfilePage />} />
           <Route
             path="/structure/:id"
             element={

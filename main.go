@@ -1,9 +1,13 @@
 package main
 
 import (
+	"context"
+	"log"
 	"net/http"
+	"os"
 
 	"github.com/ayush00git/stanza/handlers"
+	"github.com/ayush00git/stanza/store"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 )
@@ -12,6 +16,33 @@ func main() {
 	// Load .env (e.g. ANTHROPIC_API_KEY for the generation loop) if present;
 	// real environment variables still take precedence.
 	_ = godotenv.Load()
+
+	// Optional Postgres persistence (feature 08). The app degrades gracefully:
+	// without DATABASE_URL — or if the connection fails — it runs with in-memory
+	// runs only and profile endpoints report that the database is unavailable.
+	ctx := context.Background()
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		log.Println("[store] DATABASE_URL not set — running with in-memory runs only (no persistence)")
+	} else if st, err := store.New(ctx, dbURL); err != nil {
+		log.Printf("[store] disabled (%v) — running in-memory only", err)
+	} else {
+		if err := st.Migrate(ctx); err != nil {
+			log.Printf("[store] migrate failed: %v", err)
+		}
+		// Hydrate the in-memory cache so history loads on boot. ListRuns is
+		// newest-first, so Put in reverse (oldest first) to keep List() newest-first.
+		if runs, err := st.ListRuns(ctx, ""); err != nil {
+			log.Printf("[store] hydrate failed: %v", err)
+		} else {
+			for i := len(runs) - 1; i >= 0; i-- {
+				handlers.DefaultRunStore.Put(runs[i])
+			}
+			log.Printf("[store] hydrated %d run(s) from the database", len(runs))
+		}
+		handlers.DefaultStore = st
+		defer st.Close()
+	}
 
 	r := gin.Default()
 
@@ -57,6 +88,12 @@ func main() {
 	r.GET("/runs/:id/ranking", handlers.GetRunRankingHandler)
 	// Stage-6 Claude molecule generation (propose + RDKit filter) for a run.
 	r.POST("/runs/:id/generate", handlers.GenerateRunHandler)
+
+	// Researcher profiles (Stage 8): create, list, and fetch the identities that
+	// own run history. These require Postgres; without it they degrade gracefully.
+	r.POST("/profiles", handlers.CreateProfileHandler)
+	r.GET("/profiles", handlers.ListProfilesHandler)
+	r.GET("/profiles/:id", handlers.GetProfileHandler)
 
 	r.Run(":8080")
 }

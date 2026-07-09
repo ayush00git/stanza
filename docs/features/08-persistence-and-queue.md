@@ -3,7 +3,14 @@
 The durable substrate under the whole pipeline: a **Postgres** system of record for
 runs/structures/pockets/molecules/docks/scores, a **Redis-backed job queue** that keeps
 slow compute off the request path, and a **bounded pool of Python workers** that consume
-jobs and write results back. Status: **BUILD** (new — everything is in memory today).
+jobs and write results back. Status: **PARTIAL** — persistence + profiles shipped
+(Postgres system-of-record + researcher profiles); Redis queue + Python worker pool
+deferred.
+
+> **What actually shipped this stage** is described in
+> [Shipped this stage — persistence + profiles](#shipped-this-stage--persistence--profiles).
+> The rest of this document is the forward-looking target design; only its persistence
+> half is built today.
 
 See [`00-overview.md`](00-overview.md) for product framing and build order. This spec is
 the infrastructure that stages [`01`](01-run-lifecycle-and-mutation.md)–[`07`](07-selectivity-scoring-and-ranking.md)
@@ -40,6 +47,83 @@ spec owns *where that state lives* and *how stages are dispatched*.
 
 ---
 
+## Shipped this stage — persistence + profiles
+
+This stage built the **persistence half** of the target above: a Postgres system of
+record so run history survives a restart, plus a new auth-free **researcher profile**
+concept to group that history. The **Redis job queue** and the **bounded Python worker
+pool** were deliberately deferred — heavy compute (`fpocket` / `obabel` / `vina` / RDKit)
+still runs **inline in Go**, unchanged. The in-memory stores were not ripped out; Postgres
+became the durable source of truth *behind* them, and memory stays the fast read path.
+
+**What shipped:**
+
+- **Postgres via `pgx/v5`** (`github.com/jackc/pgx/v5` + `pgxpool`). A new `store` package:
+  - [`store/store.go`](../../store/store.go) — `Store{ Pool *pgxpool.Pool }`, `New(ctx, databaseURL)`,
+    `Migrate(ctx)` (applies embedded `store/migrations/*.sql` idempotently at startup), `Close()`.
+  - [`store/runs.go`](../../store/runs.go) — `SaveRun` (upserts the whole run aggregate in one
+    transaction: upsert the `runs` row, then delete-and-reinsert the run's `molecules` and
+    `docks`), `GetRun`, `ListRuns(ctx, profileID)` (profileID `""` → all, newest-first).
+  - [`store/profiles.go`](../../store/profiles.go) — `CreateProfile`, `GetProfile`, `ListProfiles`.
+  - [`store/migrations/0001_init.sql`](../../store/migrations/0001_init.sql) — the schema below.
+- **In-memory cache retained as a write-through working set.** The existing `RunStore`
+  ([`handlers.DefaultRunStore`](../../handlers/run_store.go)) is kept and now **hydrated from
+  Postgres at startup** (`ListRuns`), so history survives restarts. Every run mutation still
+  writes through to memory **and** best-effort persists to Postgres via a `persistRun` helper.
+  Postgres is the durable source of truth; memory is the fast read path serving the existing
+  `/runs` read handlers unchanged.
+- **Graceful degradation.** If `DATABASE_URL` is unset or the connection fails, the server
+  logs a notice and runs **in-memory-only** (no persistence); the profile endpoints then
+  return **503** (create) / **empty** (list) / **404** (get). The app never fails to boot
+  because Postgres is down.
+- **Profiles (new)** — auth-free identity to group history:
+  - Endpoints: `POST /profiles` `{name, email?, institution?, field?, orcid?}` (name
+    required) → 201; `GET /profiles` → `{profiles:[]}` newest-first; `GET /profiles/:id`.
+  - `POST /runs` now accepts an optional `profile_id`; `GET /runs?profile_id=<id>` filters a
+    profile's runs.
+  - Frontend: a `/profile` page (create or pick a profile; no validation), active profile
+    stored client-side in `localStorage`, runs created under the active profile, and run
+    history scoped to it (see [`09-frontend-resistance-ui.md`](09-frontend-resistance-ui.md)).
+- **Config:** `DATABASE_URL` (Postgres connection string / URL). `REDIS_URL` and
+  `WORKER_CONCURRENCY` are **not** used yet (queue deferred).
+
+### Schema shipped
+
+Four tables — a pragmatic, lossless adaptation of the target six-table DDL. Variable-shape
+singleton stage outputs live as `jsonb` on `runs` (the same `jsonb` choice the target DDL
+already makes for pocket `key_residues` / `delta`); `structures`, `pockets`, and `scores`
+are **not** yet broken out into their own tables.
+
+| Table | Shape | Notes |
+|---|---|---|
+| `profiles` | `id TEXT PK`, `name`, `email`, `institution`, `field`, `orcid`, `created_at` | **New** concept, not in the original spec — an auth-free researcher identity. |
+| `runs` | header cols (`id`, `profile_id`, `uniprot_id`, `mutation` + parsed `mutation_wt`/`pos`/`mut`, `site_hint`, `status`, `error`, `created_at`, `updated_at`) **plus** `wt_structure`, `mutagenesis`, `pockets` as **`jsonb`** | `profile_id TEXT REFERENCES profiles ON DELETE SET NULL`. The `jsonb` columns hold the variable-shape Stage 1/2/3 outputs. |
+| `molecules` | normalized from `run.Candidates` (Stage 5/6) | `UNIQUE (run_id, smiles_hash)`. |
+| `docks` | normalized from `run.Docks` (Stage 4), **one paired row per molecule** | both WT/mutant affinities + selectivity + both poses stored **inline**; `UNIQUE (run_id, smiles_hash)` is the per-run per-chemistry cache. |
+
+### Deviations from the target DDL
+
+| Deviation | Why |
+|---|---|
+| IDs are `TEXT` holding app-generated UUID strings (`google/uuid`), not the `UUID` type. | Avoids pgx uuid-type juggling for values Go already produces as strings. |
+| `status` / `source` kept as the app's free `TEXT` vocabulary (`structure_acquired` \| `mutant_built` \| `error`) rather than the spec enums. | Those differ from the spec's future state-machine vocabulary; not worth pinning an enum before it stabilizes. |
+| Variable-shape singleton stage outputs (`wt_structure`, `mutagenesis`, whole-pocket analysis) live as `jsonb` on `runs` instead of the normalized `structures` / `pockets` tables. | Same rationale the target DDL already uses for pocket `key_residues` / `delta`: variable-shape payloads are cheaper as `jsonb` than as columns until their shape settles. |
+| `docks` is **one paired row** with **inline** pose PDB (`wt_pose_pdb` / `mutant_pose_pdb TEXT`) rather than one-track-per-row with a `pose_path`. | Matches the app's `models.LigandDock`, which returns both poses inline (no file lifecycle to manage yet). |
+| The dock cache key is `(run_id, smiles_hash)`, **not** the full `(smiles_hash, pocket_id, params_hash)` triple. | This is the per-run cache the handler already enforced in memory; cross-run / cross-round reuse is a queue-build concern. |
+
+### Deferred to the queue build
+
+- The **Redis-backed job queue** (four queues), reliable delivery / consumer groups,
+  enqueue-time dedupe, and the round barrier.
+- The **bounded Python worker pool**; moving `fpocket` / `obabel` / `vina` / RDKit off the
+  Go host (they still run **inline in Go**).
+- Full normalization into separate `structures` / `pockets` / `scores` tables.
+- The full dock cache key `UNIQUE (smiles_hash, pocket_id, params_hash)` and
+  cross-round / cross-run cache reuse.
+- Durable loop checkpoint (`runs.round` / `round_state`) and crash-resume mid-round.
+
+---
+
 ## Current state
 
 Everything is in memory. Two stores hold all mutable state, and Go shells out to CLIs
@@ -67,6 +151,12 @@ Facts that shape the design:
 ---
 
 ## Design
+
+*This section describes the **full target** — the six-table Postgres schema, the Redis job
+queue, and the Python worker pool. Only the persistence half shipped this stage (Postgres
+system-of-record + profiles); see
+[Shipped this stage — persistence + profiles](#shipped-this-stage--persistence--profiles)
+for what is actually built and how the shipped four-table schema deviates from the DDL below.*
 
 ### System of record — Postgres
 
