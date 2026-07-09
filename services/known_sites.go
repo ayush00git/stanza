@@ -41,6 +41,28 @@ type SiteTemplate struct {
 	Reference  string // why this entry, and what is bound in it
 }
 
+// SiteGuidance is curated design knowledge for one site: what actually creates
+// selectivity there, what a ligand must carry to be potent, and what has already been
+// published. Like the residue set, it cannot be derived from geometry.
+//
+// Without it the generator reaches for what it remembers. Asked for KRAS G12C binders
+// it returned truncated ARS-1620 analogues — one sharing 86% of its heavy atoms with
+// the published compound — all of them 300–393 Da, below the 431–622 Da range of every
+// switch-II inhibitor that has ever shown cellular activity, and all missing the aryl
+// that fills the His95 groove.
+type SiteGuidance struct {
+	// Mechanism states, in one paragraph, where selectivity really comes from. For a
+	// covalent target it is the bond, not the fit.
+	Mechanism string
+	// Pharmacophore names the substructure that drives potency in this pocket.
+	Pharmacophore string
+	// MinMW/MaxMW bound the molecular weight of ligands known to work here. Fragments
+	// below the range reach the anchor residue but bind too weakly to matter.
+	MinMW, MaxMW float64
+	// PriorArt lists published inhibitors the model must not simply re-derive.
+	PriorArt []string
+}
+
 // KnownSite is a curated binding site on one protein, identified by the residues
 // that line it in UniProt canonical numbering.
 type KnownSite struct {
@@ -59,6 +81,8 @@ type KnownSite struct {
 	// Template is the structure to build the WT/mutant pair on. nil falls back to
 	// the AlphaFold model.
 	Template *SiteTemplate
+	// Guidance conditions the molecule generator. nil leaves it unsteered.
+	Guidance *SiteGuidance
 }
 
 // knownSites is the curated registry, keyed by UniProt accession.
@@ -83,6 +107,27 @@ var knownSites = map[string][]KnownSite{
 				// numbering and Cys12 sits at author 12.
 				AuthOffset: 0,
 				Reference:  "sotorasib covalently bound to Cys12; the S-IIP is open in this conformation",
+			},
+			Guidance: &SiteGuidance{
+				Mechanism: "Selectivity here is covalent, not shape-based. A ligand slides into the switch-II " +
+					"pocket of wild-type and G12C KRAS with essentially identical reversible affinity — pan-KRAS " +
+					"binders engage WT, G12C, G12D, G12V and G13D at Kd 10-40 nM, and adagrasib itself binds " +
+					"wild-type KRAS tightly and non-covalently. What the mutant alone provides is the Cys12 thiol. " +
+					"The warhead's electrophilic carbon must reach that sulfur and attack it along a viable " +
+					"trajectory; wild-type Gly12 offers nothing to bond, so the drug simply washes back out. " +
+					"Reversible affinity for this pocket is famously weak (ARS-853 Ki about 200 uM), so potency " +
+					"is carried by the covalent step, not by binding tighter.",
+				Pharmacophore: "an aryl or heteroaryl substituent reaching the cryptic His95/Tyr96/Gln99 groove. " +
+					"This is the single largest potency driver in the series: adding it took ARS-853 (2.5 uM) to " +
+					"ARS-1620. A molecule that only occupies the front of the pocket near Cys12 will reach the " +
+					"thiol and still be far too weak.",
+				MinMW: 430,
+				MaxMW: 620,
+				PriorArt: []string{
+					"sotorasib (AMG 510)", "adagrasib (MRTX849)", "divarasib (GDC-6036)",
+					"ARS-1620", "ARS-853",
+					"4-(piperazin-1-yl)quinazoline bearing an N-acyl warhead (the ARS-1620 core)",
+				},
 			},
 		},
 	},

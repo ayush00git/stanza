@@ -32,7 +32,7 @@ const (
 // mutant resistance pocket while sparing the wild type, conditioned on the pocket
 // context, the WT→mutant delta, and the selectivity scores of any molecules already
 // docked for this run. It uses a tool so the output is a clean SMILES list, not prose.
-func ProposeMolecules(ctx context.Context, pctx *models.MutantPocketContext, mutation models.Mutation, history []models.LigandDock, n int) ([]string, error) {
+func ProposeMolecules(ctx context.Context, pctx *models.MutantPocketContext, mutation models.Mutation, site *KnownSite, covalentResidue string, history []models.LigandDock, n int) ([]string, error) {
 	if strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY")) == "" {
 		return nil, fmt.Errorf("ANTHROPIC_API_KEY is not set")
 	}
@@ -41,14 +41,23 @@ func ProposeMolecules(ctx context.Context, pctx *models.MutantPocketContext, mut
 	system := "You are a medicinal chemist assisting an academic structure-based drug-discovery project. Suggest " +
 		"candidate drug-like small-molecule inhibitors for a validated therapeutic protein target, given a description " +
 		"of its binding pocket. The target has a clinically observed point mutation, and the aim is a mutant-selective " +
-		"therapy — like the approved medicines osimertinib, sotorasib, and adagrasib — that is more active against the " +
-		"mutant form of the target than the normal form, so it treats the disease while sparing healthy tissue. Docking " +
-		"scores (kcal/mol, where more negative means tighter binding) are provided for previously suggested molecules; " +
-		"a mutant-selective candidate binds the mutant pocket more tightly than the wild-type pocket. Suggest novel, " +
-		"synthesizable, Lipinski-drug-like molecules, informed by the pocket's shape and chemistry. Return your " +
-		"suggestions by calling the propose_molecules tool with SMILES."
+		"therapy — like the approved medicines osimertinib, sotorasib, and adagrasib — that acts on the mutant form of " +
+		"the target while sparing the normal form, so it treats the disease without harming healthy tissue. Suggest " +
+		"novel, synthesizable, Lipinski-drug-like molecules, informed by the pocket's shape and chemistry, and return " +
+		"them by calling the propose_molecules tool with SMILES.\n\n" +
+		"Docking scores (kcal/mol, more negative = tighter) are provided for molecules already evaluated. Read them " +
+		"carefully but do not assume tighter binding means selective. Selectivity does not always come from binding " +
+		"the mutant pocket more tightly: where a mutation introduces a reactive residue, a covalent bond the wild type " +
+		"cannot form is the entire mechanism, and the reversible docking scores of the two forms will be nearly " +
+		"identical. The prompt states which regime this target is in; optimise the quantity it tells you to."
 
-	user := buildGenerationPrompt(pctx, mutation, history, n)
+	if covalentResidue != "" {
+		system += "\n\nFor a covalent target: a warhead that cannot reach and attack the reactive residue is worthless " +
+			"regardless of how well the molecule docks, and a molecule that reaches it but occupies only a fraction of " +
+			"the pocket will be far too weak to matter. Both must hold."
+	}
+
+	user := buildGenerationPrompt(pctx, mutation, site, covalentResidue, history, n)
 
 	tool := anthropic.ToolParam{
 		Name:        proposeTool,
@@ -100,7 +109,7 @@ func ProposeMolecules(ctx context.Context, pctx *models.MutantPocketContext, mut
 
 // buildGenerationPrompt renders the pocket context, the mutation delta, and the
 // scored history into the per-round user message.
-func buildGenerationPrompt(pctx *models.MutantPocketContext, mutation models.Mutation, history []models.LigandDock, n int) string {
+func buildGenerationPrompt(pctx *models.MutantPocketContext, mutation models.Mutation, site *KnownSite, covalentResidue string, history []models.LigandDock, n int) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Resistance mutation: %s (wild-type %s at position %d → mutant %s).\n\n",
 		mutation.Raw, mutation.WildType, mutation.Position, mutation.Mutant)
@@ -126,22 +135,113 @@ func buildGenerationPrompt(pctx *models.MutantPocketContext, mutation models.Mut
 		fmt.Fprintf(&b, "- effect: %s\n", d.Effect)
 	}
 
-	if len(history) > 0 {
-		ranked := append([]models.LigandDock(nil), history...)
-		sort.Slice(ranked, func(i, j int) bool { return ranked[i].Selectivity > ranked[j].Selectivity })
-		if len(ranked) > historyForPrompt {
-			ranked = ranked[:historyForPrompt]
-		}
-		fmt.Fprintf(&b, "\nMolecules already evaluated (wt_score / mutant_score / selectivity, kcal/mol — higher selectivity is better; do NOT repeat these):\n")
-		for _, h := range ranked {
-			fmt.Fprintf(&b, "- %s  |  wt %.2f  mut %.2f  sel %+.2f\n", h.SMILES, h.WTScore, h.MutantScore, h.Selectivity)
-		}
-		b.WriteString("\nUse the pattern to guide new suggestions: which scaffolds and substitutions improved the mutant-vs-wild-type preference, and which did not.\n")
+	if covalentResidue != "" {
+		writeCovalentBrief(&b, covalentResidue, site)
 	}
 
-	fmt.Fprintf(&b, "\nSuggest %d NEW candidate molecules (SMILES) that are drug-like and likely to be more active "+
-		"against the mutant form than the wild-type form. Prioritize novelty and diversity over the molecules already tried.\n", n)
+	if len(history) > 0 {
+		writeHistory(&b, history, covalentResidue != "")
+	}
+
+	fmt.Fprintf(&b, "\nSuggest %d NEW candidate molecules (SMILES). Prioritise novelty and diversity over the "+
+		"molecules already tried.\n", n)
 	return b.String()
+}
+
+// writeCovalentBrief states the mechanism, the constraints, and the prior art. Left
+// unsaid, the model reaches for what it remembers: asked for KRAS G12C binders it
+// returned truncated ARS-1620 analogues, below the viable weight range, missing the
+// substituent that makes the series potent.
+func writeCovalentBrief(b *strings.Builder, covalentResidue string, site *KnownSite) {
+	fmt.Fprintf(b, "\nThis is a COVALENT target. The mutation installs %s, and its thiol is the anchor.\n",
+		covalentResidue)
+
+	if site != nil && site.Guidance != nil {
+		g := site.Guidance
+		fmt.Fprintf(b, "\nWhere selectivity comes from:\n%s\n", g.Mechanism)
+		fmt.Fprintf(b, "\nWhat a potent ligand must carry here:\n- %s\n", g.Pharmacophore)
+		if g.MinMW > 0 && g.MaxMW > 0 {
+			fmt.Fprintf(b, "- molecular weight in the %.0f–%.0f Da range; smaller fragments reach the thiol "+
+				"but bind too weakly to be useful\n", g.MinMW, g.MaxMW)
+		}
+		if len(g.PriorArt) > 0 {
+			fmt.Fprintf(b, "\nAlready published — propose genuinely new scaffolds, not analogues of these:\n")
+			for _, p := range g.PriorArt {
+				fmt.Fprintf(b, "- %s\n", p)
+			}
+		}
+	}
+
+	fmt.Fprintf(b, "\nEvery candidate must carry a cysteine-reactive warhead (acrylamide, substituted acrylamide, "+
+		"cyanoacrylamide, vinyl sulfonamide, propiolamide or haloacetamide) positioned so its electrophilic carbon "+
+		"can reach %s and attack it along a viable trajectory — roughly 105° onto a Michael acceptor's β-carbon, "+
+		"or collinear for SN2. Vary the warhead class; do not send six acrylamides.\n", covalentResidue)
+}
+
+// writeHistory shows what was measured, ordered by the quantity worth optimising.
+//
+// For a covalent target that quantity is feasibility, not selectivity. Ranking the
+// history by selectivity and calling the top entries the winners — as this prompt used
+// to — feeds the model a zero-mean noise signal every round and asks it to chase it:
+// Gly12→Cys12 barely perturbs the reversible contact set, so the WT and mutant docking
+// scores agree to ~0.1 kcal/mol and their difference is sampling error.
+func writeHistory(b *strings.Builder, history []models.LigandDock, covalent bool) {
+	ranked := append([]models.LigandDock(nil), history...)
+	if covalent {
+		sort.SliceStable(ranked, func(i, j int) bool {
+			return covalentFeasibility(ranked[i]) > covalentFeasibility(ranked[j])
+		})
+	} else {
+		sort.SliceStable(ranked, func(i, j int) bool { return ranked[i].Selectivity > ranked[j].Selectivity })
+	}
+	if len(ranked) > historyForPrompt {
+		ranked = ranked[:historyForPrompt]
+	}
+
+	if !covalent {
+		b.WriteString("\nMolecules already evaluated (wt_score / mutant_score / selectivity, kcal/mol — higher " +
+			"selectivity is better; do NOT repeat these):\n")
+		for _, h := range ranked {
+			fmt.Fprintf(b, "- %s  |  wt %.2f  mut %.2f  sel %+.2f\n", h.SMILES, h.WTScore, h.MutantScore, h.Selectivity)
+		}
+		b.WriteString("\nUse the pattern to guide new suggestions: which scaffolds and substitutions improved the " +
+			"mutant-vs-wild-type preference, and which did not.\n")
+		return
+	}
+
+	b.WriteString("\nMolecules already evaluated, best first. `feas` is covalent feasibility in [0,1]: can the " +
+		"warhead reach the thiol and attack it? It is the quantity to optimise. `mut` is the raw mutant docking " +
+		"affinity (kcal/mol, more negative = tighter) and still matters — a feasible warhead on a weak binder is " +
+		"useless. Do NOT repeat these:\n")
+	for _, h := range ranked {
+		fmt.Fprintf(b, "- %s  |  mut %.2f  ", h.SMILES, h.MutantScore)
+		switch {
+		case h.Covalent == nil:
+			b.WriteString("feas —  (no warhead detected)")
+		case h.Covalent.Uncertain:
+			fmt.Fprintf(b, "feas %.2f  (UNRELIABLE: the covalent call flips with the docking seed)", h.Covalent.Feasibility)
+		case h.Covalent.Feasibility <= 0:
+			fmt.Fprintf(b, "feas 0.00  (warhead cannot attack: reach %.2f Å, attack angle %.0f°)",
+				h.Covalent.ReachDistance, h.Covalent.AttackAngle)
+		default:
+			fmt.Fprintf(b, "feas %.2f  (reach %.2f Å, attack angle %.0f°)",
+				h.Covalent.Feasibility, h.Covalent.ReachDistance, h.Covalent.AttackAngle)
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString("\nThe wild-type and mutant docking scores are omitted on purpose: they agree to within noise, " +
+		"because the two pockets are nearly identical without the covalent bond. Do not try to widen that gap. " +
+		"Improve the warhead's geometry and the scaffold's grip on the pocket.\n")
+}
+
+// covalentFeasibility ranks a dock for the prompt. A molecule whose covalent call flips
+// with the docking seed is not evidence of anything, so it sorts with the failures
+// rather than on its median — the same rule the fitness function applies.
+func covalentFeasibility(d models.LigandDock) float64 {
+	if d.Covalent == nil || d.Covalent.Uncertain {
+		return -1
+	}
+	return d.Covalent.Feasibility
 }
 
 // GenerateCandidates is Stage 6. It asks Claude for up to n drug-like molecules
@@ -201,7 +301,16 @@ func GenerateCandidates(ctx context.Context, run *models.Run, n int, mu *sync.Mu
 		return nil, fmt.Errorf("generation: no resistance pocket to design against")
 	}
 
-	proposed, err := ProposeMolecules(ctx, pctx, run.Mutation, history, n)
+	// A mutation that installs a cysteine changes what the generator must optimise: the
+	// covalent bond, not the docking margin. The curated site supplies the rest — the
+	// pharmacophore, the viable weight range, and the prior art to avoid re-deriving.
+	var covalentResidue string
+	if isCovalentTarget(run.Mutagenesis.MutantResidue) {
+		covalentResidue = resToken(run.Mutagenesis.MutantResidue, run.Mutagenesis.TargetResidueNum)
+	}
+	site := LookupKnownSite(run.UniprotID, run.Mutation, run.SiteHint)
+
+	proposed, err := ProposeMolecules(ctx, pctx, run.Mutation, site, covalentResidue, history, n)
 	if err != nil {
 		return nil, err
 	}
