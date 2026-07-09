@@ -9,19 +9,24 @@ import (
 	"strings"
 )
 
-// Covalent docking for the mutant track. AutoDock Vina scores non-covalently and
+// Covalent geometry for the mutant track. AutoDock Vina scores non-covalently and
 // cannot see the covalent bond a warhead forms to a cysteine thiol — the entire
 // selectivity mechanism of covalent inhibitors like sotorasib (which bond KRAS
-// Cys12; wild-type Gly12 has no thiol, so the drug cannot attach). We recover that
-// signal with an explicit, geometry-gated covalent credit: a molecule that carries
-// a cysteine-reactive warhead AND docks with that warhead's reactive carbon within
-// reach of the mutated cysteine's SG earns a bond credit on the mutant track. The
-// wild-type track has no thiol and can never earn it, so the credit is exactly the
-// WT/mutant asymmetry that non-covalent docking collapses to noise.
+// Cys12; wild-type Gly12 has no thiol, so the drug cannot attach).
 //
-// The credit magnitude is a model parameter, not a Vina-computed energy: Vina has
-// no covalent term to calibrate against. What IS physically computed is the
-// geometry — whether the warhead can actually reach the thiol — via scripts/covalent.py.
+// That bond is NOT recovered by adding an energy to the mutant score. An earlier model
+// did exactly that, and it was wrong three ways: covalent potency is kinetic
+// (kinact/KI spans ~76 → ~35,000 M⁻¹s⁻¹ from ARS-853 to adagrasib, which one constant
+// cannot separate); the wild type has no thiol at all, so the discrimination is
+// unbounded rather than a few kcal/mol; and since the WT and mutant non-covalent scores
+// agree to ~0.1 kcal/mol, the selectivity margin collapsed into a restatement of the
+// constant.
+//
+// What a docked pose CAN establish is geometry: whether the warhead's electrophilic
+// carbon reaches the thiol, along a trajectory that permits nucleophilic attack, in a
+// pose the receptor actually binds. scripts/covalent.py measures that and returns a
+// dimensionless feasibility in [0,1]. Go applies no threshold of its own — every
+// chemistry and geometry decision lives in the script, where it can be audited.
 
 // covalentScript is the RDKit helper, resolved relative to the server's working
 // directory (the repo root, like scripts/mutate.py and scripts/validate.py).

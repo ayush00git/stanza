@@ -34,10 +34,18 @@ feasibility  = distance_score × angle_score        ∈ [0,1]      scripts/coval
   eligible modes : only Vina modes within 2.0 kcal/mol of the best mode may contribute
                    geometry — a floppy ligand cannot buy reach with a pose the receptor
                    never holds
-reach        = warhead C → Cys12 SG, median across 5 replicate seeds (each seed's
+reach        = warhead C → Cys12 SG, median across 3 replicate seeds (each seed's
                geometry taken from an eligible mode)             scripts/covalent.py
 uncertain    = min(feasibility) ≤ 0  AND  max(feasibility) > 0 across seeds  services/dual_dock.go
 ```
+
+Both tracks are docked under the same three seeds (`screenSeeds`, `services/dual_dock.go`)
+and every reported affinity is a median. The findings below that cite *five* seeds were
+measured before the count was reduced; their conclusions are unchanged.
+
+The docking box is passed to Vina at three decimal places (`%.3f`,
+`services/docking.go`). For a ligand whose search is bimodal that quantisation is not
+cosmetic — see "Knife-edge geometry" below.
 
 `wt_score` and `mutant_score` are raw AutoDock Vina affinities against receptors
 built from PDB 6OIM chain A with residue 12 set to Gly and Cys respectively
