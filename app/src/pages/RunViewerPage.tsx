@@ -8,6 +8,7 @@ import {
   getRunRanking,
   runStructureUrl,
   type Candidate,
+  type CovalentDock,
   type LigandDock,
   type Ranking,
   type Run,
@@ -17,6 +18,7 @@ import MolstarViewer, { type HighlightResidue } from '../components/viewer/Molst
 import MutationDeltaPanel from '../components/runs/MutationDeltaPanel'
 import CandidatePanel, { type CandidateDockState } from '../components/runs/CandidatePanel'
 import SelectivityBoard from '../components/runs/SelectivityBoard'
+import { covalentTitle } from '../components/runs/CovalentBadge'
 
 const REPRESENTATIONS = [
   { label: 'Cartoon', value: 'cartoon' },
@@ -76,13 +78,29 @@ function StructurePanel({
   )
 }
 
-/** Caption shown under a viewer while a docked pose is loaded into it. */
-function PoseCaption({ smiles, selectivity, onClear }: { smiles: string; selectivity: number; onClear: () => void }) {
+/**
+ * Caption shown under a viewer while a docked pose is loaded into it. When a
+ * covalent tether is passed (the mutant panel), it says so — the pose shown there
+ * is the tethered covalent complex, not a free dock.
+ */
+function PoseCaption({
+  smiles,
+  selectivity,
+  covalent,
+  onClear,
+}: {
+  smiles: string
+  selectivity: number
+  covalent?: CovalentDock
+  onClear: () => void
+}) {
   const sel = selectivity > 0 ? `+${selectivity.toFixed(2)}` : selectivity.toFixed(2).replace('-', '−')
   return (
     <div className="flex items-center justify-between gap-3 border-t border-hairline bg-accent-soft px-3 py-1.5">
-      <span className="min-w-0 truncate text-xs text-accent" title={smiles}>
-        Docked pose · selectivity {sel}
+      <span className="min-w-0 truncate text-xs text-accent" title={covalent ? covalentTitle(covalent) : smiles}>
+        {covalent
+          ? `Covalent tether → ${covalent.target_residue} · ${covalent.warhead_type.replace(/_/g, ' ')} · selectivity ${sel}`
+          : `Docked pose · selectivity ${sel}`}
       </span>
       <button
         type="button"
@@ -375,6 +393,7 @@ export default function RunViewerPage() {
                       <PoseCaption
                         smiles={activeDock.smiles}
                         selectivity={activeDock.selectivity}
+                        covalent={activeDock.covalent}
                         onClear={() => setActiveSmiles(null)}
                       />
                     )}

@@ -1,4 +1,5 @@
 import type { Ranking } from '../../lib/api'
+import CovalentBadge from './CovalentBadge'
 
 type Props = {
   ranking: Ranking | null
@@ -85,12 +86,20 @@ export default function SelectivityBoard({ ranking, status, error, activeSmiles,
                     </span>
 
                     <div className="min-w-0 flex-1">
-                      <p className="truncate font-mono text-xs text-ink" title={m.smiles}>
-                        {truncateSmiles(m.smiles)}
-                      </p>
+                      <div className="flex items-center gap-2">
+                        <p className="truncate font-mono text-xs text-ink" title={m.smiles}>
+                          {truncateSmiles(m.smiles)}
+                        </p>
+                        {m.scores.covalent && <CovalentBadge covalent={m.scores.covalent} className="flex-none" />}
+                      </div>
                       <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted">
                         <span className="tabular-nums">wt {m.scores.wt_score.toFixed(1)}</span>
                         <span className="tabular-nums">mut {m.scores.mutant_score.toFixed(1)}</span>
+                        {m.scores.covalent && (
+                          <span className="tabular-nums text-accent" title={`covalent bond credit applied to the mutant score`}>
+                            +{m.scores.covalent.credit.toFixed(1)} cov
+                          </span>
+                        )}
                         {m.scores.qed != null && (
                           <span className="tabular-nums">QED {m.scores.qed.toFixed(2)}</span>
                         )}

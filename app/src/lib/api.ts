@@ -475,6 +475,23 @@ export type RunPocketAnalysis = {
  * models.LigandDock. Sign convention: Vina kcal/mol, more negative = tighter;
  * selectivity = wt_score − mutant_score, large positive = mutant-selective.
  */
+/**
+ * The covalent-tether model applied to the mutant track. Vina scores
+ * non-covalently, so a warhead's WT/mutant selectivity is invisible to it; this
+ * records the geometry that recovers it — whether the warhead reaches the mutated
+ * cysteine's thiol — and the credit modelling the bond only the mutant can form.
+ * Mirrors models.CovalentDock. Present only for covalent binders on a cysteine
+ * target; mutant_pose_pdb is then the tethered covalent complex.
+ */
+export type CovalentDock = {
+  target_residue: string // e.g. "Cys12"
+  warhead_type: string // e.g. "acrylamide"
+  reach_distance: number // best warhead-C → thiol-SG across docked modes (Å)
+  credit: number // covalent credit applied to the mutant score (kcal/mol)
+  non_covalent_score: number // raw Vina mutant affinity before the credit
+  bond_distance?: number // S–C of the tethered pose (Å)
+}
+
 export type LigandDock = {
   smiles: string
   wt_score: number
@@ -482,6 +499,7 @@ export type LigandDock = {
   selectivity: number
   wt_pose_pdb?: string
   mutant_pose_pdb?: string
+  covalent?: CovalentDock
 }
 
 /** A Claude-proposed molecule that passed RDKit validation (Stage 5/6). Mirrors models.Candidate. */
@@ -520,6 +538,8 @@ export type Scores = {
   qed?: number | null
   fitness?: number | null
   status: 'scored' | 'incomplete' | string
+  /** Present when the mutant score includes a covalent tether credit. */
+  covalent?: CovalentDock
 }
 
 /** One row of the ranked leaderboard. Mirrors scoring.RankedMolecule. */

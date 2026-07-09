@@ -54,12 +54,15 @@ type Options struct {
 // re-docking.
 type Scores struct {
 	SMILES      string   `json:"smiles"`
-	MutantScore float64  `json:"mutant_score"` // kcal/mol into the MUTANT pocket
+	MutantScore float64  `json:"mutant_score"` // kcal/mol into the MUTANT pocket (covalent-adjusted when Covalent != nil)
 	WTScore     float64  `json:"wt_score"`     // kcal/mol into the WT pocket
 	Selectivity float64  `json:"selectivity"`  // wt_score − mutant_score
 	QED         *float64 `json:"qed"`          // drug-likeness (05); nil when unknown for this molecule
 	Fitness     *float64 `json:"fitness"`      // composite, pool-normalised; nil when status != "scored"
 	Status      string   `json:"status"`       // "scored" | "incomplete"
+	// Covalent is carried through from the dock so the leaderboard can flag
+	// mutant-selective covalent binders; nil for non-covalent molecules.
+	Covalent *models.CovalentDock `json:"covalent,omitempty"`
 }
 
 // RankedMolecule is one row of the ranked leaderboard.
@@ -151,6 +154,7 @@ func ScoreAndRank(runID string, docks []models.LigandDock, qedBySMILES map[strin
 			Selectivity: d.Selectivity,
 			QED:         qptr,
 			Status:      "scored",
+			Covalent:    d.Covalent,
 		}
 	}
 
