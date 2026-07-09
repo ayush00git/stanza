@@ -2,8 +2,10 @@
 # Install with:  pip install -r scripts/requirements.txt
 #
 # The Go backend shells out to these:
-#   scripts/mutate.py   (Stage 2) — single side-chain point mutation via PDBFixer.
-#   scripts/validate.py (Stage 5) — RDKit SMILES validation + drug-likeness filter.
+#   scripts/mutate.py    (Stage 2) — single side-chain point mutation via PDBFixer.
+#   scripts/validate.py  (Stage 5) — RDKit SMILES validation + drug-likeness filter.
+#   scripts/covalent.py  (Stage 4) — covalent warhead detection + tether to the
+#                                     mutated cysteine (RDKit; shells out to obabel).
 openmm
 pdbfixer
 rdkit
