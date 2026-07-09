@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-30 -30 240 220" width="100%" height="100%">
+  <defs>
+    <filter id="sticker" x="-20%" y="-20%" width="140%" height="140%">
+      <feMorphology in="SourceAlpha" operator="dilate" radius="6" result="DILATED" />
+      <feFlood flood-color="#ffffff" result="WHITE" />
+      <feComposite in="WHITE" in2="DILATED" operator="in" result="OUTLINE" />
+      <feDropShadow in="OUTLINE" dx="0" dy="4" stdDeviation="4" flood-color="#000000" flood-opacity="0.3" result="SHADOW" />
+      <feMerge>
+        <feMergeNode in="SHADOW" />
+        <feMergeNode in="OUTLINE" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+  </defs>
+
+  <g filter="url(#sticker)">
+    
+    <path d="M 20 0 H 160 V 30 H 180 V 60 H 160 V 100 V 150 H 140 V 100 H 120 V 150 H 100 V 100 H 80 V 150 H 60 V 100 H 40 V 150 H 20 V 60 H 0 V 30 H 20 Z" fill="#D47B60" />
+
+    <path d="M 0 30 H 32 V 60 H 75 L 85 75 V 130 H 20 V 60 H 0 Z" fill="#FFFFFF" />
+
+    <path d="M 180 30 H 148 V 60 H 105 L 95 75 V 130 H 160 V 60 H 180 Z" fill="#FFFFFF" />
+
+    <path d="M 32 60 H 75 L 85 75 L 75 80" stroke="#E5E5E5" stroke-width="2" fill="none" stroke-linejoin="round"/>
+    <path d="M 148 60 H 105 L 95 75 L 105 80" stroke="#E5E5E5" stroke-width="2" fill="none" stroke-linejoin="round"/>
+    
+    <rect x="30" y="90" width="25" height="25" fill="#F8F8F8" stroke="#E5E5E5" stroke-width="2" rx="2" />
+    
+    <rect x="125" y="90" width="25" height="25" fill="#F8F8F8" stroke="#E5E5E5" stroke-width="2" rx="2" />
+
+    <line x1="38" y1="78" x2="38" y2="90" stroke="#0055ff" stroke-width="3" stroke-linecap="round" />
+    <line x1="46" y1="82" x2="46" y2="90" stroke="#ff0000" stroke-width="3" stroke-linecap="round" />
+
+    <rect x="132" y="70" width="14" height="18" fill="#E0E0E0" stroke="#888" stroke-width="1" rx="1" />
+    <rect x="135" y="73" width="8" height="6" fill="#444" />
+    <line x1="135" y1="83" x2="143" y2="83" stroke="#444" stroke-width="1" />
+
+    <path d="M 40 32 L 65 45 L 40 58 L 40 48 L 55 45 L 40 42 Z" fill="#000000" />
+
+    <path d="M 140 32 L 115 45 L 140 58 L 140 48 L 125 45 L 140 42 Z" fill="#000000" />
+
+  </g>
+</svg>

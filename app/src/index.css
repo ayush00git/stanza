@@ -22,7 +22,7 @@
   --color-conf-verylow: #ff7d45;
 
   /* Type roles */
-  --font-display: "Fraunces", ui-serif, Georgia, serif;
+  --font-display: "Source Serif 4", ui-serif, Georgia, serif;
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
 
@@ -43,7 +43,7 @@
     text-rendering: optimizeLegibility;
   }
 
-  /* Fraunces optical sizing for large display type */
+  /* Source Serif 4 carries an optical-size axis; let the browser pick per size */
   .font-display {
     font-optical-sizing: auto;
   }
