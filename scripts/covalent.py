@@ -148,15 +148,20 @@ def receptor_heavy_atoms(pdb_path, skip_chain, skip_resnum):
     return out
 
 
-def pose_modes(pose_path):
+def pose_modes(pose_path, template):
     """Read a Vina multi-mode docked PDBQT into a list of RDKit molecules, one per
-    mode, via an OpenBabel SDF conversion.
+    mode, with bond orders taken from the ligand template.
 
-    Why SDF rather than PDB: a PDB carries no bond orders, so RDKit must re-perceive
-    them from geometry, which produces over-valent atoms on perfectly good poses (a
-    five-bonded piperazine nitrogen) and makes the whole assessment fail silently.
-    OpenBabel writes explicit bond blocks into SDF, and Vina preserves the ligand's
-    atom order across every mode, so one conversion yields directly usable molecules.
+    Why SDF rather than PDB: a PDB carries no bond orders, so RDKit re-perceives them
+    from interatomic distances, which yields wrong CONNECTIVITY on perfectly good
+    poses — a five-bonded piperazine nitrogen — and every mode is then discarded,
+    silently turning a covalent molecule into a non-covalent one. OpenBabel writes an
+    explicit bond block into SDF, which fixes the connectivity.
+
+    Bond ORDERS still need repairing: OpenBabel infers them from geometry too, and on
+    a docked pose it reads a nitrile as a single bond. With the connectivity correct,
+    AssignBondOrdersFromTemplate can impose the template's orders, which both makes
+    the template match exactly and gives build_tether the real C=C to open.
     """
     workdir = tempfile.mkdtemp(prefix="covpose-")
     sdf = os.path.join(workdir, "modes.sdf")
@@ -164,7 +169,15 @@ def pose_modes(pose_path):
                    capture_output=True, text=True)
     if not os.path.exists(sdf):
         return []
-    return [m for m in Chem.SDMolSupplier(sdf, removeHs=False) if m is not None]
+    out = []
+    for m in Chem.SDMolSupplier(sdf, removeHs=False):
+        if m is None:
+            continue
+        try:
+            out.append(AllChem.AssignBondOrdersFromTemplate(template, m))
+        except Exception:  # noqa: BLE001 - a mode we cannot map is a mode we skip
+            continue
+    return out
 
 
 def electrophile_indices(mol, template, e_template_idx):
@@ -337,7 +350,7 @@ def cmd_assess(args):
         print(json.dumps(result))
         return 0
 
-    mols = pose_modes(args.pose)
+    mols = pose_modes(args.pose, template)
     reach, best = scan_reach(template, tidx[0], mols, cys["SG"])
     if reach is None:
         # The pose exists but nothing in it could be mapped to the ligand. This is a

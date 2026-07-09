@@ -40,34 +40,74 @@ func RunStructurePath(runID, track string) string {
 	return filepath.Join(RunStructureDir(runID), track+".pdb")
 }
 
+// mutateBase is the structure the WT/mutant pair is built on.
+type mutateBase struct {
+	url    string
+	chain  string
+	resnum int    // author numbering of the target residue in this structure
+	label  string // provenance, recorded on the result
+	// keepChain/stripHet reduce a co-crystal to the docking unit: one chain, no
+	// bound inhibitor sitting in the pocket we are about to dock into.
+	keepChain string
+	stripHet  bool
+}
+
+// resolveBase picks the structure to build on. A curated site template wins: a
+// cryptic pocket like the KRAS switch-II site does not exist on the apo AlphaFold
+// model, and docking into a pocket that is not open cannot measure a warhead's reach
+// to the thiol. Everything else falls back to the AlphaFold monomer, whose residue
+// numbering is exactly the UniProt sequence.
+//
+// Stage 1's generic experimental pick is deliberately NOT used here: it ranks by
+// resolution and "has a drug-like ligand" without checking which residue actually
+// sits at the mutated position, and for KRAS G12C it returns 7ROV — a G12D structure
+// whose "ligand" is a GTP analogue in the nucleotide site.
+func resolveBase(uniprotID string, mutation models.Mutation, siteHint string) (mutateBase, error) {
+	if site := LookupKnownSite(uniprotID, mutation, siteHint); site != nil && site.Template != nil {
+		t := site.Template
+		return mutateBase{
+			url:       fmt.Sprintf("%s/%s.cif", rcsbDownloadBase, t.PDBID),
+			chain:     t.Chain,
+			resnum:    mutation.Position + t.AuthOffset,
+			keepChain: t.Chain,
+			stripHet:  true,
+			label: fmt.Sprintf("built from PDB %s chain %s — the %s conformation (%s)",
+				t.PDBID, t.Chain, site.Name, t.Reference),
+		}, nil
+	}
+
+	af, err := FetchComplexData(uniprotID)
+	if err != nil {
+		return mutateBase{}, fmt.Errorf("fetch AlphaFold base: %w", err)
+	}
+	if af.MonomerCifURL == "" {
+		return mutateBase{}, fmt.Errorf("no AlphaFold model available for %s", uniprotID)
+	}
+	return mutateBase{
+		url:    af.MonomerCifURL,
+		chain:  "A",
+		resnum: mutation.Position,
+		label:  fmt.Sprintf("built from the AlphaFold model %s (UniProt numbering, chain A)", af.MonomerEntryID),
+	}, nil
+}
+
 // BuildMutagenesis is Stage 2. From the acquired base structure it builds a matched
 // wild-type/mutant pair by side-chain mutagenesis: the base residue at the target
 // position is set to the wild-type residue for the WT track and to the mutant residue
 // for the mutant track. Both are written in the same coordinate frame (a clean
 // comparison basis, robust to the base crystal already carrying the mutation), under
 // the run's structure directory, and served via GET /runs/:id/structure/:track.
-func BuildMutagenesis(ctx context.Context, runID, uniprotID string, mutation models.Mutation) (*models.MutagenesisResult, error) {
+func BuildMutagenesis(ctx context.Context, runID, uniprotID string, mutation models.Mutation, siteHint string) (*models.MutagenesisResult, error) {
 	wtRes, ok1 := aaThreeLetter[strings.ToUpper(mutation.WildType)]
 	mutRes, ok2 := aaThreeLetter[strings.ToUpper(mutation.Mutant)]
 	if !ok1 || !ok2 {
 		return nil, fmt.Errorf("mutagenesis: unknown amino-acid code in %q", mutation.Raw)
 	}
 
-	// Build the matched pair on the AlphaFold model. Its residue numbering is
-	// exactly the UniProt sequence (chain A, 1-based), which removes the
-	// residue-mapping ambiguity of experimental structures and guarantees we
-	// mutate the intended residue. (Stage 1's experimental pick is still reported
-	// on the run for reference; mutating it directly needs rigorous SIFTS
-	// residue-level mapping — a follow-up.)
-	af, err := FetchComplexData(uniprotID)
+	base, err := resolveBase(uniprotID, mutation, siteHint)
 	if err != nil {
-		return nil, fmt.Errorf("mutagenesis: fetch AlphaFold base: %w", err)
+		return nil, fmt.Errorf("mutagenesis: %w", err)
 	}
-	if af.MonomerCifURL == "" {
-		return nil, fmt.Errorf("mutagenesis: no AlphaFold model available for %s", uniprotID)
-	}
-	chain := "A"
-	resnum := mutation.Position
 
 	dir := RunStructureDir(runID)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -75,42 +115,57 @@ func BuildMutagenesis(ctx context.Context, runID, uniprotID string, mutation mod
 	}
 
 	basePath := filepath.Join(dir, "base.cif")
-	if err := downloadFile(ctx, af.MonomerCifURL, basePath); err != nil {
+	if err := downloadFile(ctx, base.url, basePath); err != nil {
 		return nil, fmt.Errorf("mutagenesis: download base structure: %w", err)
 	}
 
-	// Build both tracks from the same base so they share a backbone frame.
-	if err := runMutate(ctx, basePath, chain, resnum, wtRes, RunStructurePath(runID, "wt")); err != nil {
+	// Build both tracks from the same base so they share a backbone frame. The
+	// helper verifies the written residue, so a base whose target position holds
+	// neither the wild-type nor the mutant residue fails loudly here rather than
+	// yielding a structure silently mutated at the wrong place.
+	if err := runMutate(ctx, basePath, base, wtRes, RunStructurePath(runID, "wt")); err != nil {
 		return nil, fmt.Errorf("mutagenesis: build WT structure: %w", err)
 	}
-	if err := runMutate(ctx, basePath, chain, resnum, mutRes, RunStructurePath(runID, "mutant")); err != nil {
+	if err := runMutate(ctx, basePath, base, mutRes, RunStructurePath(runID, "mutant")); err != nil {
 		return nil, fmt.Errorf("mutagenesis: build mutant structure: %w", err)
+	}
+
+	notes := []string{
+		base.label,
+		"WT and mutant share one backbone frame — they differ only at the target residue",
+	}
+	if base.stripHet {
+		notes = append(notes, "bound ligands, ions and water removed; the pocket conformation they induced is kept")
 	}
 
 	return &models.MutagenesisResult{
 		Tool:               mutagenesisTool,
 		WTStructureURL:     fmt.Sprintf("/runs/%s/structure/wt", runID),
 		MutantStructureURL: fmt.Sprintf("/runs/%s/structure/mutant", runID),
-		TargetChain:        chain,
-		TargetResidueNum:   resnum,
+		TargetChain:        base.chain,
+		TargetResidueNum:   base.resnum,
 		WildTypeResidue:    wtRes,
 		MutantResidue:      mutRes,
-		Notes: []string{
-			fmt.Sprintf("built from the AlphaFold model %s (UniProt numbering, chain A)", af.MonomerEntryID),
-			"WT and mutant share one backbone frame — they differ only at the target residue",
-		},
+		Notes:              notes,
 	}, nil
 }
 
 // runMutate shells out to the PDBFixer helper for one single-residue mutation.
-func runMutate(ctx context.Context, input, chain string, resnum int, to, out string) error {
-	cmd := exec.CommandContext(ctx, "python3", mutateScript,
+func runMutate(ctx context.Context, input string, base mutateBase, to, out string) error {
+	args := []string{mutateScript,
 		"--input", input,
-		"--chain", chain,
-		"--resnum", fmt.Sprint(resnum),
+		"--chain", base.chain,
+		"--resnum", fmt.Sprint(base.resnum),
 		"--to", to,
 		"--out", out,
-	)
+	}
+	if base.keepChain != "" {
+		args = append(args, "--keep-chain", base.keepChain)
+	}
+	if base.stripHet {
+		args = append(args, "--strip-het")
+	}
+	cmd := exec.CommandContext(ctx, "python3", args...)
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {

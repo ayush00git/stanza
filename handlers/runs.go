@@ -87,7 +87,7 @@ func CreateRunHandler(c *gin.Context) {
 
 	// Stage-2 mutagenesis: build the matched WT/mutant structure pair. A failure
 	// here is recorded on the (successful Stage-1) run rather than dropping it.
-	mut, merr := services.BuildMutagenesis(c.Request.Context(), run.ID, uniprotID, mutation)
+	mut, merr := services.BuildMutagenesis(c.Request.Context(), run.ID, uniprotID, mutation, run.SiteHint)
 	if merr != nil {
 		run.WTStructure.Notes = append(run.WTStructure.Notes, "mutagenesis failed: "+merr.Error())
 	} else {

@@ -1,6 +1,7 @@
 package services
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/ayush00git/stanza/models"
@@ -189,5 +190,65 @@ func TestJaccard(t *testing.T) {
 	}
 	if got := jaccard(a, a); got != 1 {
 		t.Errorf("jaccard with itself = %v, want 1", got)
+	}
+}
+
+// The switch-II pocket is cryptic: it barely exists on the apo AlphaFold model, so
+// the curated site must also name the holo structure whose conformation contains it.
+// Docking the same acrylamide into the AlphaFold pocket leaves its warhead 7.3 Å from
+// the Cys12 thiol — beyond bonding range — where the 6OIM-derived receptor puts it at
+// 3.8 Å. Without the template there is no covalent geometry to measure.
+func TestSwitchIISiteCarriesHoloTemplate(t *testing.T) {
+	site := LookupKnownSite("P01116", models.Mutation{WildType: "G", Position: 12, Mutant: "C"}, "")
+	if site == nil {
+		t.Fatal("no curated site for KRAS G12C")
+	}
+	if site.Template == nil {
+		t.Fatal("switch-II site carries no structure template")
+	}
+	if site.Template.PDBID != "6OIM" {
+		t.Errorf("template PDB = %q, want 6OIM", site.Template.PDBID)
+	}
+	if site.Template.Chain != "A" {
+		t.Errorf("template chain = %q, want A", site.Template.Chain)
+	}
+	// 6OIM chain A numbers Met1 at author residue 1, so UniProt numbering carries
+	// over unchanged and Cys12 sits at author 12.
+	if site.Template.AuthOffset != 0 {
+		t.Errorf("template AuthOffset = %d, want 0", site.Template.AuthOffset)
+	}
+}
+
+// resolveBase must build KRAS G12C on the curated holo template rather than the apo
+// model, reduce it to the one chain, and strip the bound sotorasib — which otherwise
+// occupies the very pocket the run docks into.
+func TestResolveBasePrefersCuratedTemplate(t *testing.T) {
+	mut := models.Mutation{WildType: "G", Position: 12, Mutant: "C", Raw: "G12C"}
+	base, err := resolveBase("P01116", mut, "")
+	if err != nil {
+		t.Fatalf("resolveBase: %v", err)
+	}
+	if !strings.Contains(base.url, "6OIM") {
+		t.Errorf("base url = %q, want the 6OIM entry", base.url)
+	}
+	if base.chain != "A" {
+		t.Errorf("base chain = %q, want A", base.chain)
+	}
+	if base.resnum != 12 {
+		t.Errorf("base resnum = %d, want 12 (UniProt 12 + offset 0)", base.resnum)
+	}
+	if base.keepChain != "A" {
+		t.Errorf("keepChain = %q, want A — a co-crystal carries chains we do not dock", base.keepChain)
+	}
+	if !base.stripHet {
+		t.Error("stripHet = false; the bound inhibitor would occupy the switch-II pocket")
+	}
+}
+
+// A mutation with no curated site must not borrow another site's template.
+func TestResolveBaseIgnoresTemplateForOtherMutations(t *testing.T) {
+	mut := models.Mutation{WildType: "G", Position: 13, Mutant: "D", Raw: "G13D"}
+	if site := LookupKnownSite("P01116", mut, ""); site != nil {
+		t.Fatalf("G13D unexpectedly matched curated site %q", site.Name)
 	}
 }

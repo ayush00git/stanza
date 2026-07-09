@@ -9,11 +9,16 @@ so both tracks emerge in the same normalized PDB format and coordinate frame.
 
 Usage:
     python3 mutate.py --input <path.pdb|.cif> --chain <C> \
-        --resnum <int> --to <RES3> --out <path.pdb>
+        --resnum <int> --to <RES3> --out <path.pdb> \
+        [--keep-chain <C>] [--strip-het]
 
 `--to` is a 3-letter residue name (e.g. GLY, CYS). On success a single JSON
 line is printed to stdout and the process exits 0. Errors go to stderr with a
 non-zero exit code (2 = residue not found, 1 = any other failure).
+
+--keep-chain drops every other chain, and --strip-het removes ligands, ions and
+water. Both are needed when the base structure is an experimental co-crystal:
+the bound inhibitor otherwise occupies the very pocket we dock into.
 """
 
 import argparse
@@ -30,6 +35,28 @@ def load_fixer(input_path):
     if input_path.endswith(".cif"):
         return PDBFixer(pdbxfile=open(input_path))
     return PDBFixer(filename=input_path)
+
+
+def keep_only_chain(fixer, chain_id):
+    """Drop every chain but chain_id."""
+    drop = [i for i, c in enumerate(fixer.topology.chains()) if c.id != chain_id]
+    if drop:
+        fixer.removeChains(chainIndices=drop)
+
+
+def write_structure(fixer, out_path):
+    """Write the fixed structure, PRESERVING author residue numbering.
+
+    OpenMM's PDB writer defaults to keepIds=False, which renumbers every residue
+    sequentially from 1. On an AlphaFold model, already numbered from 1, that is a
+    no-op and goes unnoticed. On an experimental structure it silently shifts the
+    whole chain -- 6OIM opens with an expression-tag GLY at author residue 0, so
+    Cys12 would land at 13 -- and every downstream lookup of "chain A residue 12",
+    from the covalent thiol search to pocket residue matching, then reads the wrong
+    residue. PDBFixer itself preserves the ids; only the writer discards them.
+    """
+    with open(out_path, "w") as handle:
+        PDBFile.writeFile(fixer.topology, fixer.positions, handle, keepIds=True)
 
 
 def find_residue_name(fixer, chain_id, resnum):
@@ -69,12 +96,25 @@ def main():
     parser.add_argument("--resnum", required=True, type=int, help="Residue number")
     parser.add_argument("--to", required=True, help="Target residue, 3-letter (e.g. CYS)")
     parser.add_argument("--out", required=True, help="Output PDB path")
+    parser.add_argument("--keep-chain", default="", help="Drop every other chain")
+    parser.add_argument(
+        "--strip-het",
+        action="store_true",
+        help="Remove ligands, ions and water (needed for co-crystal bases)",
+    )
     args = parser.parse_args()
 
     target = args.to.upper()
 
     # Load the structure.
     fixer = load_fixer(args.input)
+
+    # Reduce to the biological unit we dock against, before anything else reads
+    # residue positions: a co-crystal's bound inhibitor sits in the target pocket.
+    if args.keep_chain:
+        keep_only_chain(fixer, args.keep_chain)
+    if args.strip_het:
+        fixer.removeHeterogens(keepWater=False)
 
     # Determine the current residue name at the requested position.
     current = find_residue_name(fixer, args.chain, args.resnum)
@@ -97,8 +137,7 @@ def main():
 
     # Rebuild only the mutated side chain (no loop modelling), then write.
     rebuild_side_chain(fixer)
-    with open(args.out, "w") as handle:
-        PDBFile.writeFile(fixer.topology, fixer.positions, handle)
+    write_structure(fixer, args.out)
 
     # Verify the written output actually carries the target residue.
     verify = PDBFixer(filename=args.out)

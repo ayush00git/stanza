@@ -22,6 +22,25 @@ import (
 // So a site the literature has already settled is named outright, and matched to
 // a pocket by residue overlap rather than re-derived from geometry.
 
+// SiteTemplate names the experimental structure whose conformation actually
+// contains a curated site. A cryptic pocket is absent from the apo model that the
+// pipeline otherwise builds on: the switch-II pocket only opens around a bound
+// inhibitor, so an AlphaFold KRAS docks ligands ~1.6 kcal/mol weaker and leaves the
+// warhead 7.3 A from the Cys12 thiol — beyond bonding range — where the same ligand
+// docked into the sotorasib co-crystal reaches 4.5 A. Building the WT/mutant pair on
+// the holo backbone is what makes the covalent geometry measurable at all.
+//
+// The bound ligand itself is stripped before docking; what we keep is the open
+// side-chain conformation it induced.
+type SiteTemplate struct {
+	PDBID string // e.g. "6OIM"
+	Chain string // author chain carrying the site
+	// AuthOffset maps UniProt numbering onto this entry's author numbering:
+	// auth_seq_id = uniprot_position + AuthOffset.
+	AuthOffset int
+	Reference  string // why this entry, and what is bound in it
+}
+
 // KnownSite is a curated binding site on one protein, identified by the residues
 // that line it in UniProt canonical numbering.
 type KnownSite struct {
@@ -37,6 +56,9 @@ type KnownSite struct {
 	Aliases []string
 	// Reference is the structural evidence for the residue set.
 	Reference string
+	// Template is the structure to build the WT/mutant pair on. nil falls back to
+	// the AlphaFold model.
+	Template *SiteTemplate
 }
 
 // knownSites is the curated registry, keyed by UniProt accession.
@@ -53,6 +75,15 @@ var knownSites = map[string][]KnownSite{
 			Mutations: []string{"G12C"},
 			Aliases:   []string{"switchii", "switch2", "siip", "sotorasib", "adagrasib"},
 			Reference: "PDB 6OIM — sotorasib (AMG 510) bound to KRAS G12C",
+			Template: &SiteTemplate{
+				PDBID: "6OIM",
+				Chain: "A",
+				// 6OIM chain A carries an expression-tag GLY at author residue 0 and
+				// then runs Met1..., so author numbering already equals UniProt
+				// numbering and Cys12 sits at author 12.
+				AuthOffset: 0,
+				Reference:  "sotorasib covalently bound to Cys12; the S-IIP is open in this conformation",
+			},
 		},
 	},
 }
