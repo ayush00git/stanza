@@ -1,4 +1,4 @@
-import type { Ranking } from '../../lib/api'
+import { isCovalentCredited, type Ranking } from '../../lib/api'
 import CovalentBadge from './CovalentBadge'
 
 type Props = {
@@ -95,7 +95,7 @@ export default function SelectivityBoard({ ranking, status, error, activeSmiles,
                       <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted">
                         <span className="tabular-nums">wt {m.scores.wt_score.toFixed(1)}</span>
                         <span className="tabular-nums">mut {m.scores.mutant_score.toFixed(1)}</span>
-                        {m.scores.covalent && (
+                        {m.scores.covalent && isCovalentCredited(m.scores.covalent) && (
                           <span className="tabular-nums text-accent" title={`covalent bond credit applied to the mutant score`}>
                             +{m.scores.covalent.credit.toFixed(1)} cov
                           </span>

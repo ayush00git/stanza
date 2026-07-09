@@ -6,6 +6,7 @@ import {
   getRun,
   getRunPockets,
   getRunRanking,
+  isCovalentCredited,
   runStructureUrl,
   type Candidate,
   type CovalentDock,
@@ -98,9 +99,13 @@ function PoseCaption({
   return (
     <div className="flex items-center justify-between gap-3 border-t border-hairline bg-accent-soft px-3 py-1.5">
       <span className="min-w-0 truncate text-xs text-accent" title={covalent ? covalentTitle(covalent) : smiles}>
-        {covalent
-          ? `Covalent tether → ${covalent.target_residue} · ${covalent.warhead_type.replace(/_/g, ' ')} · selectivity ${sel}`
-          : `Docked pose · selectivity ${sel}`}
+        {/* Only a 'tethered' record replaced the docked pose with the covalent complex;
+            an 'in_reach' molecule earned its credit but is still shown as docked. */}
+        {covalent?.status === 'tethered'
+          ? `Covalent tether → ${covalent.target_residue} · ${(covalent.warhead_type ?? '').replace(/_/g, ' ')} · selectivity ${sel}`
+          : covalent && isCovalentCredited(covalent)
+            ? `Docked pose · +${covalent.credit.toFixed(1)} covalent credit · selectivity ${sel}`
+            : `Docked pose · selectivity ${sel}`}
       </span>
       <button
         type="button"

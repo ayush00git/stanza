@@ -483,13 +483,33 @@ export type RunPocketAnalysis = {
  * Mirrors models.CovalentDock. Present only for covalent binders on a cysteine
  * target; mutant_pose_pdb is then the tethered covalent complex.
  */
+/**
+ * Why a warhead did or did not earn its covalent credit. A warhead that cannot reach
+ * the thiol and a warhead whose measurement failed are different facts, and both
+ * differ from a molecule carrying no warhead at all (which has no CovalentDock).
+ */
+export type CovalentStatus =
+  | 'tethered' // credit applied; mutant_pose_pdb is the tethered complex
+  | 'in_reach' // credit applied; the tethered pose was rejected
+  | 'out_of_reach' // warhead present but too far from the thiol to bond
+  | 'unreadable_pose' // no docked mode could be mapped onto the ligand
+  | 'assess_failed' // the assessment itself errored
+  | 'no_thiol' // the target residue carries no SG
+
 export type CovalentDock = {
   target_residue: string // e.g. "Cys12"
-  warhead_type: string // e.g. "acrylamide"
-  reach_distance: number // best warhead-C → thiol-SG across docked modes (Å)
-  credit: number // covalent credit applied to the mutant score (kcal/mol)
+  warhead_type?: string // e.g. "acrylamide"
+  status: CovalentStatus
+  reach_distance?: number // best warhead-C → thiol-SG across docked modes (Å)
+  credit: number // covalent credit applied to the mutant score (kcal/mol); 0 unless credited
   non_covalent_score: number // raw Vina mutant affinity before the credit
   bond_distance?: number // S–C of the tethered pose (Å)
+  note?: string // why a tether or an assessment failed
+}
+
+/** Whether the covalent bond was modelled and the mutant score credited for it. */
+export function isCovalentCredited(c: CovalentDock): boolean {
+  return c.status === 'tethered' || c.status === 'in_reach'
 }
 
 export type LigandDock = {
