@@ -1,43 +1,35 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="-30 -30 240 220" width="100%" height="100%">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 500" width="600" height="500" fill="none" role="img" aria-label="Claude Code doctor mascot">
+  <title>Claude, MD</title>
   <defs>
-    <filter id="sticker" x="-20%" y="-20%" width="140%" height="140%">
-      <feMorphology in="SourceAlpha" operator="dilate" radius="6" result="DILATED" />
-      <feFlood flood-color="#ffffff" result="WHITE" />
-      <feComposite in="WHITE" in2="DILATED" operator="in" result="OUTLINE" />
-      <feDropShadow in="OUTLINE" dx="0" dy="4" stdDeviation="4" flood-color="#000000" flood-opacity="0.3" result="SHADOW" />
-      <feMerge>
-        <feMergeNode in="SHADOW" />
-        <feMergeNode in="OUTLINE" />
-        <feMergeNode in="SourceGraphic" />
-      </feMerge>
-    </filter>
+    <path id="bot" d="M90,60 L120,60 L120,38 L180,38 L180,60 L420,60 L420,38 L480,38 L480,60 L510,60 L510,150 L540,150 L540,215 L510,215 L510,430 L426,430 L426,374 L398,374 L398,430 L314,430 L314,374 L286,374 L286,430 L202,430 L202,374 L174,374 L174,430 L90,430 L90,215 L60,215 L60,150 L90,150 Z"/>
+    <clipPath id="botClip"><use href="#bot"/></clipPath>
   </defs>
 
-  <g filter="url(#sticker)">
-    
-    <path d="M 20 0 H 160 V 30 H 180 V 60 H 160 V 100 V 150 H 140 V 100 H 120 V 150 H 100 V 100 H 80 V 150 H 60 V 100 H 40 V 150 H 20 V 60 H 0 V 30 H 20 Z" fill="#D47B60" />
+  <!-- body + white sticker outline -->
+  <use href="#bot" fill="#CE7357" stroke="#FFFFFF" stroke-width="26"
+       paint-order="stroke" stroke-linejoin="round" stroke-linecap="round"/>
 
-    <path d="M 0 30 H 32 V 60 H 75 L 85 75 V 130 H 20 V 60 H 0 Z" fill="#FFFFFF" />
+  <!-- lab coat (clipped to body) -->
+  <g clip-path="url(#botClip)">
+    <rect x="80" y="238" width="440" height="140" fill="#FFFFFF"/>
+    <!-- open collar V (clay chest shows) -->
+    <polygon points="300,300 250,238 350,238" fill="#CE7357"/>
+    <path d="M250,238 L300,300 L350,238" stroke="#E6E6E6" stroke-width="6" stroke-linejoin="round" fill="none"/>
+    <!-- button placket -->
+    <line x1="300" y1="300" x2="300" y2="372" stroke="#EAEAEA" stroke-width="3"/>
+    <circle cx="300" cy="320" r="4" fill="#D6D6D6"/>
+    <circle cx="300" cy="344" r="4" fill="#D6D6D6"/>
+    <circle cx="300" cy="368" r="4" fill="#D6D6D6"/>
+    <!-- breast pocket + molecule emblem -->
+    <rect x="345" y="280" width="54" height="42" rx="4" stroke="#E4E4E4" stroke-width="3" fill="none"/>
+    <polygon points="372,286 384.99,293.5 384.99,308.5 372,316 359.01,308.5 359.01,293.5"
+             stroke="#CE7357" stroke-width="3" fill="none" stroke-linejoin="round"/>
+    <circle cx="372" cy="286" r="3.5" fill="#CE7357"/>
+  </g>
 
-    <path d="M 180 30 H 148 V 60 H 105 L 95 75 V 130 H 160 V 60 H 180 Z" fill="#FFFFFF" />
-
-    <path d="M 32 60 H 75 L 85 75 L 75 80" stroke="#E5E5E5" stroke-width="2" fill="none" stroke-linejoin="round"/>
-    <path d="M 148 60 H 105 L 95 75 L 105 80" stroke="#E5E5E5" stroke-width="2" fill="none" stroke-linejoin="round"/>
-    
-    <rect x="30" y="90" width="25" height="25" fill="#F8F8F8" stroke="#E5E5E5" stroke-width="2" rx="2" />
-    
-    <rect x="125" y="90" width="25" height="25" fill="#F8F8F8" stroke="#E5E5E5" stroke-width="2" rx="2" />
-
-    <line x1="38" y1="78" x2="38" y2="90" stroke="#0055ff" stroke-width="3" stroke-linecap="round" />
-    <line x1="46" y1="82" x2="46" y2="90" stroke="#ff0000" stroke-width="3" stroke-linecap="round" />
-
-    <rect x="132" y="70" width="14" height="18" fill="#E0E0E0" stroke="#888" stroke-width="1" rx="1" />
-    <rect x="135" y="73" width="8" height="6" fill="#444" />
-    <line x1="135" y1="83" x2="143" y2="83" stroke="#444" stroke-width="1" />
-
-    <path d="M 40 32 L 65 45 L 40 58 L 40 48 L 55 45 L 40 42 Z" fill="#000000" />
-
-    <path d="M 140 32 L 115 45 L 140 58 L 140 48 L 125 45 L 140 42 Z" fill="#000000" />
-
+  <!-- eyes: > < -->
+  <g stroke="#161616" stroke-width="26" stroke-linecap="butt" stroke-linejoin="miter" fill="none">
+    <polyline points="168,116 214,150 168,184"/>
+    <polyline points="432,116 386,150 432,184"/>
   </g>
 </svg>
