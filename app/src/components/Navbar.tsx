@@ -1,10 +1,11 @@
 import { Link } from 'react-router-dom'
 import { useActiveProfile } from '../lib/profile'
 
+// The CTA already points at #search, so it isn't repeated here.
 const links = [
-  { label: 'Search', href: '#search' },
   { label: 'Pipeline', href: '#pipeline' },
-  { label: 'Data', href: '#data' },
+  { label: 'Selectivity', href: '#selectivity' },
+  { label: 'Covalent', href: '#covalent' },
 ]
 
 export default function Navbar() {

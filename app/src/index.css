@@ -10,6 +10,11 @@
   --color-accent: #1a56db;
   --color-accent-soft: #e8effc;
 
+  /* Selectivity margin — the number the pipeline exists to produce. Reserved
+     for the WT↔mutant gap and nothing else. */
+  --color-gain: #0f766e;
+  --color-gain-soft: #e3f3f1;
+
   /* AlphaFold pLDDT confidence scale — used only for the confidence strip */
   --color-conf-veryhigh: #0053d6;
   --color-conf-confident: #65cbf3;
@@ -72,6 +77,22 @@
   animation: rise 0.7s var(--ease-out-quart) forwards;
 }
 
+/* Affinity bars draw out from the axis, so the WT/mutant gap opens up in front
+   of the reader rather than arriving pre-formed. */
+@keyframes draw {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+.draw {
+  transform-origin: left center;
+  animation: draw 0.9s var(--ease-out-quart) backwards;
+}
+
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;
@@ -79,6 +100,10 @@
   .rise {
     animation: none;
     opacity: 1;
+    transform: none;
+  }
+  .draw {
+    animation: none;
     transform: none;
   }
 }

@@ -10,8 +10,8 @@ export default function Footer() {
             Stanza<span className="text-accent">.</span>
           </p>
           <p className="mt-3 max-w-xs text-sm leading-relaxed text-muted">
-            Structure-guided drug discovery, from protein target to lead
-            candidate.
+            Resistance-aware small-molecule design. Bind the mutant, spare the
+            wild type.
           </p>
         </div>
 
@@ -19,8 +19,11 @@ export default function Footer() {
           <a href="#pipeline" className="transition-colors hover:text-ink">
             Pipeline
           </a>
+          <a href="#covalent" className="transition-colors hover:text-ink">
+            Covalent
+          </a>
           <a href="#data" className="transition-colors hover:text-ink">
-            Data
+            Stack
           </a>
           <a href="#top" className="transition-colors hover:text-ink">
             Back to top
