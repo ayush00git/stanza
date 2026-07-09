@@ -1,4 +1,5 @@
-import { isCovalentFeasible, type Ranking } from '../../lib/api'
+import type { ReactNode } from 'react'
+import { type CovalentDock, type Ranking } from '../../lib/api'
 import CovalentBadge from './CovalentBadge'
 
 type Props = {
@@ -10,45 +11,132 @@ type Props = {
   onSelect: (smiles: string) => void
 }
 
-function truncateSmiles(smiles: string, max = 22): string {
-  return smiles.length > max ? `${smiles.slice(0, max - 1)}…` : smiles
-}
-
-/** Signed selectivity, e.g. "+4.10" / "−0.30" (true minus glyph). */
-function signedSel(x: number): string {
-  const s = x.toFixed(2)
+/** Signed value with a true minus glyph, e.g. "+4.10" / "−0.30". */
+function signed(x: number, digits = 2): string {
+  const s = x.toFixed(digits)
   return x > 0 ? `+${s}` : s.replace('-', '−')
 }
 
-/** Selectivity colouring: mutant-selective (positive) reads as accent. */
-function selTone(x: number): string {
-  if (x > 0.3) return 'text-accent'
-  if (x < 0) return 'text-muted'
-  return 'text-ink'
+/** Affinities are negative kcal/mol; render the minus as a glyph, not a hyphen. */
+function affinity(x: number): string {
+  return x.toFixed(2).replace('-', '−')
+}
+
+const SELECTIVITY_NOTE =
+  'Selectivity = WT affinity − mutant affinity. For a covalent target it is expected to be ≈0: swapping Gly12 for Cys12 barely changes the pocket shape, so a ligand binds both forms equally well. Real selectivity comes from the covalent bond, which only the mutant can form — see feasibility.'
+
+const FEASIBILITY_NOTE =
+  'Covalent feasibility, 0–1 and dimensionless. Can the warhead reach the cysteine thiol and attack it along a viable trajectory? It is a geometry score, NOT an energy: covalent potency is kinetic (kinact/KI) and cannot be expressed in kcal/mol.'
+
+/**
+ * One labelled statistic. The label is always spelled out and the unit always shown —
+ * a bare "−10.6" beside a bare "0.77" invites the reader to compare a kcal/mol energy
+ * with a dimensionless geometry score, which is exactly the confusion that let a
+ * hand-picked constant pass for a selectivity prediction.
+ */
+function Stat({
+  label,
+  value,
+  unit,
+  hint,
+  tone = 'text-ink',
+  note,
+}: {
+  label: string
+  value: ReactNode
+  unit?: string
+  hint?: string
+  tone?: string
+  note?: string
+}) {
+  return (
+    <div className="flex flex-col gap-0.5" title={hint}>
+      <span className="text-[10px] uppercase tracking-wide text-muted">{label}</span>
+      <span className={`text-sm tabular-nums ${tone}`}>
+        {value}
+        {unit && <span className="ml-1 text-[10px] font-normal text-muted">{unit}</span>}
+      </span>
+      {note && <span className="text-[10px] leading-tight text-muted/80">{note}</span>}
+    </div>
+  )
+}
+
+/** The covalent statistics, spelled out — including why an infeasible warhead failed. */
+function CovalentStats({ c }: { c: CovalentDock }) {
+  const measured = c.reach_distance != null && c.attack_angle != null
+  const failure =
+    c.feasibility <= 0 && measured
+      ? c.reach_distance! > 4
+        ? 'too far from the thiol'
+        : 'wrong attack trajectory'
+      : undefined
+
+  return (
+    <>
+      <Stat
+        label="Covalent feasibility"
+        value={c.feasibility.toFixed(2)}
+        hint={FEASIBILITY_NOTE}
+        tone={c.uncertain ? 'text-muted' : c.feasibility > 0 ? 'text-accent' : 'text-muted'}
+        note={
+          c.uncertain
+            ? 'flips with the docking seed — not ranked'
+            : failure ?? (c.feasibility > 0 ? `warhead can attack ${c.target_residue}` : undefined)
+        }
+      />
+      {measured && (
+        <>
+          <Stat
+            label="Reach"
+            value={c.reach_distance!.toFixed(2)}
+            unit="Å"
+            hint={`Distance from the warhead's electrophilic carbon to the ${c.target_residue} sulfur, median over ${c.replicates ?? 1} docking seed(s). Full score at ≤3.50 Å (the van der Waals contact distance); zero beyond 4.00 Å.`}
+            note={c.reach_spread ? `spread ${c.reach_spread.toFixed(2)} Å` : undefined}
+          />
+          <Stat
+            label="Attack angle"
+            value={c.attack_angle!.toFixed(0)}
+            unit="°"
+            hint="The angle the thiol approaches the electrophilic carbon at. Nucleophilic attack on a Michael acceptor needs ~105° (Bürgi–Dunitz); an SN2 haloacetamide needs ~180°. A warhead at the right distance but the wrong angle cannot react."
+          />
+        </>
+      )}
+      {c.bond_distance != null && (
+        <Stat
+          label="S–C bond"
+          value={c.bond_distance.toFixed(2)}
+          unit="Å"
+          hint="Sulfur–carbon bond length in the tethered covalent adduct built from this pose. A real thioether bond is 1.81 Å."
+          note="tethered adduct"
+        />
+      )}
+    </>
+  )
 }
 
 /**
- * SelectivityBoard — the resistance leaderboard. Unlike the raw-affinity
- * DockedResults, it ranks docked molecules by composite fitness (Stage 7): mutant
- * potency + selectivity margin + drug-likeness, pool-normalised. Clicking a row
- * loads that molecule's WT + mutant poses into the two viewers.
+ * SelectivityBoard — the leaderboard. Ranks docked molecules by composite fitness
+ * (Stage 7): mutant potency + selectivity margin + drug-likeness + covalent
+ * feasibility, each pool-normalised. Clicking a row loads that molecule's WT + mutant
+ * poses into the two viewers.
+ *
+ * Every statistic is named and carries its unit. The SMILES is never truncated: it is
+ * the molecule's identity, and an ellipsis makes two different candidates look alike.
  */
 export default function SelectivityBoard({ ranking, status, error, activeSmiles, onSelect }: Props) {
   const rows = ranking?.ranked ?? []
+  const covalentRun = rows.some((m) => m.scores.covalent != null)
+
   // The best selectivity in the pool, not the top-ranked row's — those differ, because
   // fitness ranks on potency, drug-likeness and covalent feasibility too.
   const best = rows.length ? Math.max(...rows.map((m) => m.scores.selectivity)) : null
-  // On a covalent target the non-covalent margin is ~0 by design (Gly12→Cys12 barely
-  // moves reversible binding), so selectivity stops being the ranking signal and must
-  // read as secondary; feasibility carries the discrimination instead.
-  const covalentRun = rows.some((m) => m.scores.covalent != null)
   // A seed-dependent call is not evidence, so it cannot be the pool's headline number.
   const feasibilities = rows.flatMap((m) =>
     m.scores.covalent && !m.scores.covalent.uncertain ? [m.scores.covalent.feasibility] : [],
   )
   const topFeasibility = feasibilities.length ? Math.max(...feasibilities) : null
-  const selectivityNote =
-    'For a covalent target the non-covalent margin is expected to be ~0: Gly12→Cys12 barely perturbs reversible binding, so WT and mutant Vina scores agree. The covalent evidence is the feasibility, not this number.'
+
+  const w = ranking?.weights
 
   return (
     <section className="flex flex-col">
@@ -56,9 +144,16 @@ export default function SelectivityBoard({ ranking, status, error, activeSmiles,
         <h2 className="font-display text-base font-medium text-ink">Selectivity ranking</h2>
         <p className="text-sm text-muted">
           {rows.length === 0
-            ? 'Dock candidates to rank them by selectivity fitness.'
-            : `${rows.length} molecule${rows.length !== 1 ? 's' : ''} · click a row to view its poses.`}
+            ? 'Dock candidates to rank them by composite fitness.'
+            : `${rows.length} molecule${rows.length !== 1 ? 's' : ''} · click one to load its poses.`}
         </p>
+        {covalentRun && (
+          <p className="mt-1 text-xs leading-relaxed text-muted">
+            This is a covalent target. Selectivity reads ≈0 because both forms of the pocket bind the
+            molecule equally — only the mutant offers a thiol to bond. Rank on{' '}
+            <span className="text-accent">covalent feasibility</span>.
+          </p>
+        )}
       </div>
 
       {status === 'error' ? (
@@ -74,6 +169,7 @@ export default function SelectivityBoard({ ranking, status, error, activeSmiles,
           <ul className="flex flex-col">
             {rows.map((m) => {
               const isActive = m.smiles === activeSmiles
+              const s = m.scores
               return (
                 <li key={m.smiles}>
                   <div
@@ -86,92 +182,100 @@ export default function SelectivityBoard({ ranking, status, error, activeSmiles,
                         onSelect(m.smiles)
                       }
                     }}
-                    className={`group flex cursor-pointer items-center gap-3 border-b border-hairline px-3 py-2.5 transition-colors last:border-b-0 ${
-                      isActive ? 'border-l-2 border-l-accent bg-accent-soft pl-[10px]' : 'hover:bg-paper-deep'
+                    className={`group flex cursor-pointer flex-col gap-3 border-b border-hairline px-4 py-3.5 transition-colors last:border-b-0 ${
+                      isActive ? 'border-l-2 border-l-accent bg-accent-soft pl-[14px]' : 'hover:bg-paper-deep'
                     }`}
                   >
-                    <span
-                      className={`w-5 flex-none text-center text-sm tabular-nums ${
-                        isActive ? 'text-accent' : 'text-muted'
-                      }`}
-                    >
-                      {m.rank}
-                    </span>
-
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <p className="truncate font-mono text-xs text-ink" title={m.smiles}>
-                          {truncateSmiles(m.smiles)}
-                        </p>
-                        {m.scores.covalent && <CovalentBadge covalent={m.scores.covalent} className="flex-none" />}
-                      </div>
-                      <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted">
-                        <span className="tabular-nums">wt {m.scores.wt_score.toFixed(1)}</span>
-                        <span className="tabular-nums">mut {m.scores.mutant_score.toFixed(1)}</span>
-                        {m.scores.covalent && isCovalentFeasible(m.scores.covalent) && (
-                          <span
-                            className="tabular-nums text-muted"
-                            title={
-                              m.scores.covalent.uncertain
-                                ? 'covalent feasibility (0–1) — but this call flips with the docking seed, so treat it as indistinguishable, not a rank'
-                                : 'covalent feasibility (0–1): geometric plausibility that the warhead bonds the thiol. Dimensionless — not an energy.'
-                            }
-                          >
-                            feas {m.scores.covalent.feasibility.toFixed(2)}{m.scores.covalent.uncertain ? '?' : ''}
-                          </span>
-                        )}
-                        {m.scores.qed != null && (
-                          <span className="tabular-nums">QED {m.scores.qed.toFixed(2)}</span>
-                        )}
-                      </div>
-                    </div>
-
-                    <div
-                      className="flex flex-none flex-col items-end"
-                      title={covalentRun ? selectivityNote : undefined}
-                    >
+                    {/* Rank, covalent verdict, and the composite score that produced the rank. */}
+                    <div className="flex items-start gap-3">
                       <span
-                        className={
-                          covalentRun
-                            ? 'text-xs tabular-nums text-muted'
-                            : `text-sm tabular-nums ${selTone(m.scores.selectivity)}`
-                        }
+                        className={`mt-0.5 flex h-5 w-5 flex-none items-center justify-center rounded-full text-xs tabular-nums ${
+                          isActive ? 'bg-accent text-paper' : 'bg-paper-deep text-muted'
+                        }`}
                       >
-                        {signedSel(m.scores.selectivity)}
+                        {m.rank}
                       </span>
-                      <span className={covalentRun ? 'text-[10px] text-muted/80' : 'text-xs text-muted'}>
-                        selectivity
-                      </span>
+
+                      <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+                        <div className="flex flex-wrap items-center gap-2">
+                          {s.covalent && <CovalentBadge covalent={s.covalent} />}
+                          {s.fitness != null && (
+                            <span
+                              className="text-[10px] text-muted"
+                              title="Composite fitness: the pool-normalised weighted sum that produced this rank. Comparable only within this run."
+                            >
+                              fitness {s.fitness.toFixed(2)}
+                            </span>
+                          )}
+                        </div>
+                        {/* Never truncated: the SMILES is the molecule's identity. */}
+                        <p className="break-all font-mono text-[11px] leading-relaxed text-ink select-text">
+                          {m.smiles}
+                        </p>
+                      </div>
                     </div>
+
+                    {/* Two columns, not a viewport-driven breakpoint: this board lives in a
+                        narrow sidebar, where `sm:` would widen it exactly when it should not. */}
+                    <dl className="grid grid-cols-2 gap-x-6 gap-y-2.5 pl-8">
+                      <Stat
+                        label="Wild-type affinity"
+                        value={affinity(s.wt_score)}
+                        unit="kcal/mol"
+                        hint="AutoDock Vina affinity against the wild-type pocket. More negative = binds tighter."
+                      />
+                      <Stat
+                        label="Mutant affinity"
+                        value={affinity(s.mutant_score)}
+                        unit="kcal/mol"
+                        hint="AutoDock Vina affinity against the mutant pocket. Raw — no covalent term is folded in."
+                      />
+                      <Stat
+                        label="Selectivity"
+                        value={signed(s.selectivity)}
+                        unit="kcal/mol"
+                        hint={SELECTIVITY_NOTE}
+                        tone={covalentRun ? 'text-muted' : s.selectivity > 0.3 ? 'text-accent' : 'text-ink'}
+                        note={covalentRun ? 'expected ≈0 here' : undefined}
+                      />
+                      {s.covalent && <CovalentStats c={s.covalent} />}
+                      {s.qed != null && (
+                        <Stat
+                          label="Drug-likeness"
+                          value={s.qed.toFixed(2)}
+                          hint="QED, 0–1. Real switch-II inhibitors are large (431–622 Da) and score modestly here; a high QED on a tiny fragment is not an advantage."
+                          note="QED, 0–1"
+                        />
+                      )}
+                    </dl>
                   </div>
                 </li>
               )
             })}
           </ul>
 
-          <div className="flex items-center justify-between border-t border-hairline px-3 py-2 text-xs text-muted">
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-t border-hairline bg-paper-deep px-4 py-2.5 text-xs text-muted">
             {/* Name each weight rather than printing a bare ratio: on a covalent run the
                 feasibility term carries most of the ranking, and an unlabelled triple that
                 silently omits it reads as if selectivity were still doing the work. */}
-            <span title="fitness = w·potency + w·selectivity + w·drug-likeness + w·covalent feasibility, each pool-normalised">
-              {ranking?.normalization ?? 'zscore'} ·{' '}
-              {ranking
-                ? `pot ${ranking.weights.potency} · sel ${ranking.weights.selectivity} · qed ${ranking.weights.drug_likeness}` +
-                  (ranking.weights.covalent_feasibility
-                    ? ` · feas ${ranking.weights.covalent_feasibility}`
-                    : '')
+            <span title="Composite fitness is the weighted sum of these four terms, each normalised across the docked pool.">
+              {ranking?.normalization ?? 'zscore'} weights ·{' '}
+              {w
+                ? `potency ${w.potency} · selectivity ${w.selectivity} · drug-likeness ${w.drug_likeness}` +
+                  (w.covalent_feasibility ? ` · feasibility ${w.covalent_feasibility}` : '')
                 : '—'}
             </span>
             {/* On a covalent run the headline is feasibility: "best selectivity" would put a
                 number that is sampling error in the summary slot. */}
             {covalentRun && topFeasibility != null ? (
-              <span title="highest covalent feasibility in the pool — the warhead most able to attack the thiol">
+              <span title="Highest covalent feasibility in the pool — the warhead most able to attack the thiol. Seed-dependent calls are excluded.">
                 Top feasibility <span className="text-accent">{topFeasibility.toFixed(2)}</span>
               </span>
             ) : (
               best != null && (
                 <span>
-                  Best selectivity <span className={selTone(best)}>{signedSel(best)}</span>
+                  Best selectivity{' '}
+                  <span className={best > 0.3 ? 'text-accent' : 'text-ink'}>{signed(best)}</span>
                 </span>
               )
             )}
