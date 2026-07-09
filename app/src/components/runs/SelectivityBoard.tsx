@@ -96,8 +96,15 @@ export default function SelectivityBoard({ ranking, status, error, activeSmiles,
                         <span className="tabular-nums">wt {m.scores.wt_score.toFixed(1)}</span>
                         <span className="tabular-nums">mut {m.scores.mutant_score.toFixed(1)}</span>
                         {m.scores.covalent && isCovalentCredited(m.scores.covalent) && (
-                          <span className="tabular-nums text-accent" title={`covalent bond credit applied to the mutant score`}>
-                            +{m.scores.covalent.credit.toFixed(1)} cov
+                          <span
+                            className={`tabular-nums ${m.scores.covalent.uncertain ? 'text-muted' : 'text-accent'}`}
+                            title={
+                              m.scores.covalent.uncertain
+                                ? 'this credit flips with the docking seed — indistinguishable, not a rank'
+                                : 'covalent bond credit applied to the mutant score'
+                            }
+                          >
+                            +{m.scores.covalent.credit.toFixed(1)} cov{m.scores.covalent.uncertain ? '?' : ''}
                           </span>
                         )}
                         {m.scores.qed != null && (

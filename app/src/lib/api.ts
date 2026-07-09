@@ -500,10 +500,14 @@ export type CovalentDock = {
   target_residue: string // e.g. "Cys12"
   warhead_type?: string // e.g. "acrylamide"
   status: CovalentStatus
-  reach_distance?: number // best warhead-C → thiol-SG across docked modes (Å)
+  reach_distance?: number // MEDIAN warhead-C → thiol-SG over replicate seeds (Å)
+  reach_spread?: number // max − min reach across replicates (Å)
+  replicates?: number // docking seeds the reach was measured over
   credit: number // covalent credit applied to the mutant score (kcal/mol); 0 unless credited
   non_covalent_score: number // raw Vina mutant affinity before the credit
   bond_distance?: number // S–C of the tethered pose (Å)
+  /** The covalent call flips with the docking seed — treat as indistinguishable, not ranked. */
+  uncertain?: boolean
   note?: string // why a tether or an assessment failed
 }
 

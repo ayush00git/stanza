@@ -5,17 +5,28 @@ function warheadLabel(type: string | undefined): string {
   return (type ?? 'warhead').replace(/_/g, ' ')
 }
 
+/** "3.75 Å (median of 5 seeds, spread 0.43 Å)" — reach without its spread is a fiction. */
+function reachPhrase(c: CovalentDock): string {
+  const r = c.reach_distance?.toFixed(2) ?? '?'
+  if (!c.replicates || c.replicates < 2) return `${r} Å`
+  const sp = c.reach_spread != null ? `, spread ${c.reach_spread.toFixed(2)} Å` : ''
+  return `${r} Å (median of ${c.replicates} seeds${sp})`
+}
+
 /** A full-sentence explanation of the covalent model, used as a tooltip. */
 export function covalentTitle(c: CovalentDock): string {
   const warhead = warheadLabel(c.warhead_type)
   const raw = `raw mutant ${c.non_covalent_score.toFixed(1)}`
+  const shaky = c.uncertain
+    ? ' — WARNING: some docking seeds place the warhead in bonding range and others do not, so this credit is decided by the RNG. Treat as indistinguishable, not as a rank.'
+    : ''
 
   switch (c.status) {
     case 'tethered':
     case 'in_reach': {
       const parts = [
         `Covalent tether to ${c.target_residue}`,
-        `${warhead} warhead reaches the thiol at ${c.reach_distance?.toFixed(2)} Å`,
+        `${warhead} warhead reaches the thiol at ${reachPhrase(c)}`,
         `+${c.credit.toFixed(2)} kcal/mol bond credit (${raw})`,
       ]
       if (c.status === 'tethered' && c.bond_distance) {
@@ -23,14 +34,14 @@ export function covalentTitle(c: CovalentDock): string {
       } else {
         parts.push('no valid tethered pose was built, so the docked pose is shown')
       }
-      return parts.join(' · ')
+      return parts.join(' · ') + shaky
     }
     case 'out_of_reach':
       return [
         `${warhead} warhead, but it cannot reach ${c.target_residue}`,
-        `closest approach ${c.reach_distance?.toFixed(2)} Å across all docked modes`,
+        `closest approach ${reachPhrase(c)}`,
         `no covalent credit applied (${raw})`,
-      ].join(' · ')
+      ].join(' · ') + shaky
     case 'unreadable_pose':
       return `${warhead} warhead, but the docked pose could not be mapped onto the ligand, so its reach to ${c.target_residue} is unknown — this is a failed measurement, not a negative result${c.note ? ` (${c.note})` : ''}`
     case 'assess_failed':
@@ -58,14 +69,18 @@ export default function CovalentBadge({
 }) {
   const credited = isCovalentCredited(covalent)
   const failed = covalent.status === 'unreadable_pose' || covalent.status === 'assess_failed'
+  // A credit that flips with the seed must not look as confident as one that holds.
+  const shaky = covalent.uncertain === true
 
-  const tone = credited
-    ? 'bg-accent-soft text-accent'
-    : failed
-      ? 'bg-paper-deep text-conf-verylow'
-      : 'bg-paper-deep text-muted'
+  const tone = shaky
+    ? 'bg-paper-deep text-muted ring-1 ring-inset ring-conf-verylow/40'
+    : credited
+      ? 'bg-accent-soft text-accent'
+      : failed
+        ? 'bg-paper-deep text-conf-verylow'
+        : 'bg-paper-deep text-muted'
 
-  const label = credited ? 'covalent' : failed ? 'not assessed' : 'no reach'
+  const label = shaky ? 'seed-dependent' : credited ? 'covalent' : failed ? 'not assessed' : 'no reach'
 
   return (
     <span
@@ -76,7 +91,7 @@ export default function CovalentBadge({
       <span aria-hidden="true">⬡</span>
       <span>{label}</span>
       {covalent.warhead_type && (
-        <span className={credited ? 'text-accent/70' : 'opacity-70'}>
+        <span className={credited && !shaky ? 'text-accent/70' : 'opacity-70'}>
           · {warheadLabel(covalent.warhead_type)}
         </span>
       )}

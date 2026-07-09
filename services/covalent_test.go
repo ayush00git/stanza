@@ -146,3 +146,77 @@ func TestIsCovalentTarget(t *testing.T) {
 		}
 	}
 }
+
+func TestMedianAndSpread(t *testing.T) {
+	xs := []float64{4.51, 3.78, 4.09, 3.90, 4.12}
+	if got := median(xs); got != 4.09 {
+		t.Errorf("median = %v, want 4.09", got)
+	}
+	if got := spread(xs); math.Abs(got-0.73) > 1e-9 {
+		t.Errorf("spread = %v, want 0.73", got)
+	}
+	// median must not mutate the caller's slice — reaches are reused for the spread.
+	if xs[0] != 4.51 {
+		t.Errorf("median reordered the input slice: %v", xs)
+	}
+}
+
+func TestMedianReplicatePicksMiddleAffinity(t *testing.T) {
+	reps := []replicate{
+		{seed: 1, affinity: -9.5},
+		{seed: 2, affinity: -7.1},
+		{seed: 3, affinity: -8.3}, // median
+		{seed: 4, affinity: -8.9},
+		{seed: 5, affinity: -7.7},
+	}
+	got := medianReplicate(reps)
+	if got.seed != 3 {
+		t.Errorf("medianReplicate seed = %d, want 3 (affinity -8.3)", got.seed)
+	}
+	if reps[0].seed != 1 {
+		t.Error("medianReplicate reordered the caller's slice")
+	}
+}
+
+// A molecule whose warhead lands inside the bonding window under some seeds and
+// outside it under others has no covalent answer — its credit is the RNG's. Measured
+// on a real run: reach 3.72–5.78 Å over five seeds, credit swinging 0.00 ↔ 3.42.
+// Reporting a median as though it were a rank launders that noise into signal.
+func TestSeedStraddlingCreditIsUncertain(t *testing.T) {
+	p := DefaultCovalentParams()
+	straddling := []float64{3.72, 5.78, 3.79, 5.15, 3.83} // some in reach, some not
+	stable := []float64{3.72, 3.79, 3.83, 3.90, 3.75}     // all in reach
+
+	uncertain := func(reaches []float64) bool {
+		var lo, hi float64 = math.Inf(1), math.Inf(-1)
+		for _, r := range reaches {
+			c := covalentCredit(r, p)
+			lo, hi = math.Min(lo, c), math.Max(hi, c)
+		}
+		return lo <= 0 && hi > 0
+	}
+	if !uncertain(straddling) {
+		t.Error("a credit that straddles zero across seeds must be flagged uncertain")
+	}
+	if uncertain(stable) {
+		t.Error("a credit positive under every seed must not be flagged uncertain")
+	}
+}
+
+// Both tracks must be docked under the same seeds, or a WT/mutant difference could
+// come from the search rather than the receptor.
+func TestScreenSeedsAreOddAndShared(t *testing.T) {
+	if len(screenSeeds) < 3 {
+		t.Fatalf("only %d replicate seeds; reach spread cannot be estimated", len(screenSeeds))
+	}
+	if len(screenSeeds)%2 == 0 {
+		t.Errorf("%d seeds: an even count makes the median ambiguous", len(screenSeeds))
+	}
+	seen := map[int]bool{}
+	for _, s := range screenSeeds {
+		if seen[s] {
+			t.Errorf("duplicate replicate seed %d", s)
+		}
+		seen[s] = true
+	}
+}

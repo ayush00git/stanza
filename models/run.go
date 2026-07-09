@@ -106,11 +106,19 @@ type CovalentDock struct {
 	TargetResidue    string  `json:"target_residue"`           // e.g. "Cys12"
 	WarheadType      string  `json:"warhead_type,omitempty"`   // e.g. "acrylamide"
 	Status           string  `json:"status"`                   // one of the Covalent* constants
-	ReachDistance    float64 `json:"reach_distance,omitempty"` // best warhead-C → thiol-SG across modes (Å)
+	ReachDistance    float64 `json:"reach_distance,omitempty"` // MEDIAN warhead-C → thiol-SG over replicates (Å)
+	ReachSpread      float64 `json:"reach_spread,omitempty"`   // max − min reach across replicates (Å)
+	Replicates       int     `json:"replicates,omitempty"`     // docking seeds the reach was measured over
 	Credit           float64 `json:"credit"`                   // covalent credit applied to the mutant score (kcal/mol)
 	NonCovalentScore float64 `json:"non_covalent_score"`       // raw Vina mutant affinity before the credit
 	BondDistance     float64 `json:"bond_distance,omitempty"`  // S–C of the emitted tether pose (Å)
-	Note             string  `json:"note,omitempty"`           // why a tether or an assessment failed
+	// Uncertain marks a molecule whose covalent call flips with the docking seed:
+	// some replicates place the warhead in bonding range and others do not, so the
+	// credit — and therefore the whole selectivity margin — is decided by the RNG.
+	// Such a molecule is not "better" or "worse" than its neighbours; it is
+	// indistinguishable, and ranking it on a median would launder noise into signal.
+	Uncertain bool   `json:"uncertain,omitempty"`
+	Note      string `json:"note,omitempty"` // why a tether or an assessment failed
 }
 
 // Candidate is a Stage-6 molecule proposed by Claude that passed the Stage-5 RDKit
