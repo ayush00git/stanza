@@ -181,14 +181,16 @@ export default function Hero() {
             <DualTrack wt={-6.8} mutant={-9.4} />
           </div>
 
-          {/* The covalent bond docking cannot score, and the geometry that earns it. */}
+          {/* Why the run builds on the co-crystal: the cryptic pocket only opens
+              there, and the warhead only gets near the thiol when it does. */}
           <div className="flex items-baseline justify-between gap-4 border-t border-hairline px-6 py-3">
             <span className="font-mono text-[10px] uppercase tracking-[0.15em] text-muted">
-              Covalent
+              Warhead reach
             </span>
             <span className="text-right text-[0.75rem] text-muted">
-              Warhead <span className="font-mono tabular-nums text-ink">4.5 Å</span>{' '}
-              from the Cys12 thiol
+              <span className="font-mono tabular-nums text-ink">4.5 Å</span> on
+              the co-crystal ·{' '}
+              <span className="font-mono tabular-nums">7.3 Å</span> predicted
             </span>
           </div>
 

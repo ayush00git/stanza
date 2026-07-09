@@ -6,33 +6,34 @@ const warheads = [
   { name: 'Haloacetamide', mech: 'SN2' },
 ]
 
-const REACH_IDEAL = 3.5
-const REACH_MAX = 5.0
+// Mirrors the constants in scripts/covalent.py.
+const REACH_IDEAL = 3.5 // Bondi S···C van der Waals contact
+const REACH_MAX = 4.0
 const AXIS_MIN = 3.0
-const AXIS_MAX = 5.5
+const AXIS_MAX = 4.5
 
 const pos = (d: number) => ((d - AXIS_MIN) / (AXIS_MAX - AXIS_MIN)) * 100
 
-/** The geometry gate: reach distance from the warhead's electrophilic carbon to
- *  the cysteine thiol, and the credit it earns. */
+/** Reach: how close the electrophilic carbon gets to the cysteine thiol. */
 function ReachGate() {
   return (
     <div>
       <div className="flex items-baseline justify-between">
         <span className="font-mono text-[11px] uppercase tracking-[0.15em] text-muted">
-          Warhead → thiol reach
+          Reach
         </span>
-        <span className="font-mono text-[11px] text-muted">Å</span>
+        <span className="text-[0.8rem] text-muted">
+          warhead carbon → thiol sulfur
+        </span>
       </div>
 
-      {/* Full credit, then a linear ramp, then nothing. */}
       <div className="mt-3 flex h-2 w-full overflow-hidden rounded-full">
         <div
-          className="h-full bg-[var(--color-gain)]"
+          className="h-full bg-accent"
           style={{ width: `${pos(REACH_IDEAL)}%` }}
         />
         <div
-          className="h-full bg-gradient-to-r from-[var(--color-gain)] to-paper-deep"
+          className="h-full bg-gradient-to-r from-accent to-paper-deep"
           style={{ width: `${pos(REACH_MAX) - pos(REACH_IDEAL)}%` }}
         />
         <div className="h-full flex-1 bg-paper-deep" />
@@ -50,22 +51,47 @@ function ReachGate() {
         ))}
       </div>
 
-      <dl className="mt-5 space-y-2.5 border-t border-hairline pt-4 text-[0.85rem] text-muted">
+      <p className="mt-4 text-[0.85rem] leading-relaxed text-muted">
+        Full marks at the van der Waals contact distance and closer — a pose that
+        overlaps the sulfur cannot do better than touching it. Past{' '}
+        <span className="font-mono tabular-nums text-ink">4.0 Å</span> the
+        warhead is not covalently competent.
+      </p>
+    </div>
+  )
+}
+
+/** Angle: whether the approach trajectory can reach a transition state. */
+function AngleGate() {
+  return (
+    <div>
+      <div className="flex items-baseline justify-between">
+        <span className="font-mono text-[11px] uppercase tracking-[0.15em] text-muted">
+          Attack angle
+        </span>
+        <span className="text-[0.8rem] text-muted">at the electrophilic carbon</span>
+      </div>
+
+      <dl className="mt-4 space-y-2.5 text-[0.85rem] text-muted">
         <div className="flex items-baseline justify-between gap-4">
-          <dt className="tabular-nums">≤ 3.5 Å — positioned to bond</dt>
-          <dd className="whitespace-nowrap tabular-nums text-[var(--color-gain)]">
-            Full credit, 4.0 kcal/mol
+          <dt>Michael acceptor</dt>
+          <dd className="whitespace-nowrap tabular-nums text-ink">
+            105° — Bürgi–Dunitz
           </dd>
         </div>
         <div className="flex items-baseline justify-between gap-4">
-          <dt className="tabular-nums">3.5 – 5.0 Å — straining</dt>
-          <dd className="whitespace-nowrap">Credit decays linearly</dd>
-        </div>
-        <div className="flex items-baseline justify-between gap-4">
-          <dt className="tabular-nums">&gt; 5.0 Å — out of reach</dt>
-          <dd className="whitespace-nowrap">No credit</dd>
+          <dt>S<sub>N</sub>2 electrophile</dt>
+          <dd className="whitespace-nowrap tabular-nums text-ink">
+            180° — backside
+          </dd>
         </div>
       </dl>
+
+      <p className="mt-4 text-[0.85rem] leading-relaxed text-muted">
+        Within 15° of the ideal trajectory the approach is as good as perfect;
+        by 40° off it is worthless. Deviation is punished symmetrically, so too
+        shallow and too steep cost the same.
+      </p>
     </div>
   )
 }
@@ -97,16 +123,16 @@ export default function Covalent() {
             <p className="mt-4 text-[0.95rem] leading-relaxed text-muted">
               Docking alone cannot see it. Vina scores non-covalent
               interactions, so it rates a warhead touching a thiol the same as a
-              warhead touching thin air, and the WT/mutant difference collapses
-              into noise.
+              warhead touching thin air, and the energetic difference between the
+              two tracks collapses into noise.
             </p>
             <p className="mt-4 text-[0.95rem] leading-relaxed text-muted">
-              So Stanza scores the bond separately. It detects the warhead in the
-              proposed molecule, measures whether the docked pose actually puts
-              that warhead within striking distance of the cysteine, and credits
-              the mutant track only when the geometry says a bond could form. The
-              wild-type track can never earn the credit. The asymmetry docking
-              missed comes back exactly where it belongs.
+              So Stanza measures the bond instead of scoring it. It finds the
+              warhead, then reads the docked poses for the one that best lines up
+              a real attack: close enough to bond, and angled the way that
+              chemistry demands. Feasibility is the product of those two — reach
+              times angle, zero to one — and it is never invented, only measured.
+              The wild-type track has no thiol, so it can never earn any of it.
             </p>
 
             <p className="mt-8 font-mono text-[11px] uppercase tracking-[0.15em] text-muted">
@@ -126,13 +152,29 @@ export default function Covalent() {
           </div>
 
           <div className="rounded-xl border border-hairline bg-paper p-8">
-            <ReachGate />
-
-            <p className="mt-6 border-t border-hairline pt-5 text-[0.9rem] leading-relaxed text-muted">
-              The credit is a model parameter; the geometry is measured. A
-              better-placed warhead scores better, which gives the generation
-              loop a gradient to climb.
+            <p className="font-mono text-[11px] uppercase tracking-[0.15em] text-accent">
+              Feasibility = reach × angle
             </p>
+
+            <div className="mt-6 space-y-7">
+              <ReachGate />
+              <div className="border-t border-hairline pt-7">
+                <AngleGate />
+              </div>
+            </div>
+
+            <div className="mt-7 space-y-3 border-t border-hairline pt-5">
+              <p className="text-[0.85rem] leading-relaxed text-muted">
+                Only poses the receptor genuinely binds are allowed to
+                contribute, so reach cannot be bought with a strained,
+                high-energy conformation.
+              </p>
+              <p className="text-[0.85rem] leading-relaxed text-muted">
+                Geometry is read across several docking seeds. When the verdict
+                flips between them, the molecule is marked uncertain — shown on
+                the board, but scored as zero.
+              </p>
+            </div>
           </div>
         </div>
       </div>

@@ -41,8 +41,7 @@ export default function TargetSearch() {
         <div className="mt-8 flex flex-col gap-4 rounded-xl border border-hairline bg-paper-deep/40 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
           <p className="max-w-lg text-[0.9rem] leading-relaxed text-muted">
             This is the <span className="text-ink">oligomerization</span> axis —
-            monomer against dimer. Resistance is a different question, and it
-            runs on its own pair of structures.
+            monomer against dimer.
           </p>
           <Link
             to="/runs"
