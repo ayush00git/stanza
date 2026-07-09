@@ -125,13 +125,18 @@ that drops the approved drug cannot judge a molecule designed to resemble it.
 - **Exhaustiveness is 16**, twice Vina's default. At 8 the search is *bimodal* on some
   ligands: it finds either a deep pose with the warhead 5.8 Å from the thiol or a
   shallower one at 3.85 Å, and the covalent verdict follows whichever it found. Seeds
-  cannot fix that — they resample the same two basins. Raising exhaustiveness can, and
-  does. Vina is bit-deterministic given (seed, cpu, box, ligand), so this is basin
-  selection, not RNG.
+  cannot fix that — they resample the same two basins. Vina is bit-deterministic given
+  (seed, cpu, box, ligand), so this is basin selection, not RNG.
+
+  Raising exhaustiveness **narrows** the problem; it does not remove it. On two measured
+  ligands it took one from a straddling verdict to a stable one and cut the other's
+  flip-prone three-seed subsets from 3-in-10 to 0-in-10. Others still show a reach spread
+  of several ångström at 16. For those, the answer is `uncertain`, and that is the correct
+  answer.
 - A molecule whose covalent call **flips with the docking seed** is flagged `uncertain`,
   surfaced to the user, and contributes **0** to fitness — ranking a coin flip on its
-  median would launder noise into signal. It remains the backstop for ligands that stay
-  genuinely ambiguous.
+  median would launder noise into signal. It is the backstop for ligands whose search
+  stays genuinely bimodal, and it fires in practice, not just in principle.
 - The docking box reaches Vina at three decimal places. For a ligand with a bimodal search
   that quantisation is not cosmetic: it selects a basin.
 
