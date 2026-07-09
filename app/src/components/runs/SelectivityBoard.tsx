@@ -35,11 +35,18 @@ function selTone(x: number): string {
  */
 export default function SelectivityBoard({ ranking, status, error, activeSmiles, onSelect }: Props) {
   const rows = ranking?.ranked ?? []
-  const best = rows[0]?.scores.selectivity
+  // The best selectivity in the pool, not the top-ranked row's — those differ, because
+  // fitness ranks on potency, drug-likeness and covalent feasibility too.
+  const best = rows.length ? Math.max(...rows.map((m) => m.scores.selectivity)) : null
   // On a covalent target the non-covalent margin is ~0 by design (Gly12→Cys12 barely
   // moves reversible binding), so selectivity stops being the ranking signal and must
   // read as secondary; feasibility carries the discrimination instead.
   const covalentRun = rows.some((m) => m.scores.covalent != null)
+  // A seed-dependent call is not evidence, so it cannot be the pool's headline number.
+  const feasibilities = rows.flatMap((m) =>
+    m.scores.covalent && !m.scores.covalent.uncertain ? [m.scores.covalent.feasibility] : [],
+  )
+  const topFeasibility = feasibilities.length ? Math.max(...feasibilities) : null
   const selectivityNote =
     'For a covalent target the non-covalent margin is expected to be ~0: Gly12→Cys12 barely perturbs reversible binding, so WT and mutant Vina scores agree. The covalent evidence is the feasibility, not this number.'
 
@@ -155,11 +162,18 @@ export default function SelectivityBoard({ ranking, status, error, activeSmiles,
                     : '')
                 : '—'}
             </span>
-            {best != null && (
-              <span title={covalentRun ? selectivityNote : undefined}>
-                Best selectivity{' '}
-                <span className={covalentRun ? 'text-muted' : selTone(best)}>{signedSel(best)}</span>
+            {/* On a covalent run the headline is feasibility: "best selectivity" would put a
+                number that is sampling error in the summary slot. */}
+            {covalentRun && topFeasibility != null ? (
+              <span title="highest covalent feasibility in the pool — the warhead most able to attack the thiol">
+                Top feasibility <span className="text-accent">{topFeasibility.toFixed(2)}</span>
               </span>
+            ) : (
+              best != null && (
+                <span>
+                  Best selectivity <span className={selTone(best)}>{signedSel(best)}</span>
+                </span>
+              )
             )}
           </div>
         </div>
