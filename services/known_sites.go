@@ -61,6 +61,18 @@ type SiteGuidance struct {
 	MinMW, MaxMW float64
 	// PriorArt lists published inhibitors the model must not simply re-derive.
 	PriorArt []string
+	// MassAnchors are real ligands with their true masses, quoted to the model so it can
+	// calibrate. Naming the window is not enough: told "430–620 Da", the generator returned
+	// seven molecules of 386–421 Da in one round — every one just under the floor, every one
+	// silently deleted. A model cannot weigh a SMILES string; it can copy a known mass.
+	// Masses are PubChem values (see data/prior_art_kras_g12c.json), not recollections.
+	MassAnchors []MassAnchor
+}
+
+// MassAnchor is one published ligand's molecular weight, used to calibrate the generator.
+type MassAnchor struct {
+	Name string
+	MW   float64
 }
 
 // KnownSite is a curated binding site on one protein, identified by the residues
@@ -123,6 +135,12 @@ var knownSites = map[string][]KnownSite{
 					"thiol and still be far too weak.",
 				MinMW: 430,
 				MaxMW: 620,
+				// The two tool compounds sit ON the floor and the two drugs mid-window: together
+				// they say "the floor is real, and the useful mass is higher than you think".
+				MassAnchors: []MassAnchor{
+					{"ARS-1620", 430.8}, {"ARS-853", 433.0},
+					{"sotorasib", 560.6}, {"adagrasib", 604.1},
+				},
 				PriorArt: []string{
 					"sotorasib (AMG 510)", "adagrasib (MRTX849)", "divarasib (GDC-6036)",
 					"ARS-1620", "ARS-853",

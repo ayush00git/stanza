@@ -174,6 +174,37 @@ func buildGenerationPrompt(pctx *models.MutantPocketContext, mutation models.Mut
 	return b.String()
 }
 
+// writeWeightGate states the molecular-weight window as the hard gate it actually is.
+//
+// Phrased as advice — "molecular weight in the 430–620 Da range; smaller fragments bind
+// too weakly" — the model treated it as a preference and undershot. One round returned
+// eight molecules at 386, 401, 409, 409, 412, 419, 421 and 448 Da: seven of the eight just
+// under the floor, all seven discarded by the pre-filter before docking, one kept. That is
+// a two-minute Opus call spent to retain one molecule.
+//
+// Three things fix it, and all three are needed. Say that under-weight molecules are
+// deleted rather than penalised, because a soft constraint invites a near miss. Quote real
+// masses, because the model cannot weigh a SMILES string but can anchor on a number it
+// knows. And aim at the middle of the window rather than its floor, because a design aimed
+// at 430 Da lands under 430 as often as over it.
+func writeWeightGate(b *strings.Builder, g *SiteGuidance) {
+	mid := (g.MinMW + g.MaxMW) / 2
+	fmt.Fprintf(b, "- MOLECULAR WEIGHT IS A HARD GATE: %.0f–%.0f Da. A molecule outside this range is "+
+		"DISCARDED before it is ever docked or scored — it is deleted, not penalised. Aim for the middle "+
+		"of the window, around %.0f–%.0f Da: a molecule designed at the %.0f Da floor lands under it as "+
+		"often as over it. Smaller fragments do reach the thiol, and they bind far too weakly to matter.\n",
+		g.MinMW, g.MaxMW, mid-40, mid+40, g.MinMW)
+
+	if len(g.MassAnchors) > 0 {
+		fmt.Fprintf(b, "- Calibrate against real masses — you cannot weigh a SMILES string, so anchor on these:\n")
+		for _, a := range g.MassAnchors {
+			fmt.Fprintf(b, "    %s: %.1f Da\n", a.Name, a.MW)
+		}
+		fmt.Fprintf(b, "  A drug-like molecule averages ~13–14 Da per heavy atom, so %.0f Da is roughly %.0f "+
+			"heavy atoms. Count them before you answer.\n", mid, mid/13.5)
+	}
+}
+
 // writeCovalentBrief states the mechanism, the constraints, and the prior art. Left
 // unsaid, the model reaches for what it remembers: asked for KRAS G12C binders it
 // returned truncated ARS-1620 analogues, below the viable weight range, missing the
@@ -187,8 +218,7 @@ func writeCovalentBrief(b *strings.Builder, covalentResidue string, site *KnownS
 		fmt.Fprintf(b, "\nWhere selectivity comes from:\n%s\n", g.Mechanism)
 		fmt.Fprintf(b, "\nWhat a potent ligand must carry here:\n- %s\n", g.Pharmacophore)
 		if g.MinMW > 0 && g.MaxMW > 0 {
-			fmt.Fprintf(b, "- molecular weight in the %.0f–%.0f Da range; smaller fragments reach the thiol "+
-				"but bind too weakly to be useful\n", g.MinMW, g.MaxMW)
+			writeWeightGate(b, g)
 		}
 		if len(g.PriorArt) > 0 {
 			fmt.Fprintf(b, "\nAlready published — propose genuinely new scaffolds, not analogues of these:\n")

@@ -2,6 +2,7 @@ package services
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -78,5 +79,46 @@ func TestSummarizeValidationOmitsAbsentThresholds(t *testing.T) {
 	}
 	if got["proposed"] != float64(1) || got["kept"] != float64(1) {
 		t.Errorf("proposed/kept missing from JSON: %v", got)
+	}
+}
+
+// Told "430–620 Da" as advice, the generator returned 386, 401, 409, 409, 412, 419, 421
+// and 448 Da — seven of eight just under the floor, seven deleted before docking. The
+// brief must say the gate deletes, must quote real masses to calibrate against, and must
+// aim at the middle of the window rather than its edge.
+func TestWeightGateIsStatedAsAGateNotAPreference(t *testing.T) {
+	g := &SiteGuidance{
+		MinMW: 430, MaxMW: 620,
+		MassAnchors: []MassAnchor{{"ARS-1620", 430.8}, {"sotorasib", 560.6}},
+	}
+	var b strings.Builder
+	writeWeightGate(&b, g)
+	got := b.String()
+
+	for _, want := range []string{
+		"HARD GATE",  // not a suggestion
+		"DISCARDED",  // states the consequence
+		"485–565 Da", // the midpoint band (525 ± 40), not the floor
+		"ARS-1620: 430.8 Da",
+		"sotorasib: 560.6 Da",
+		"heavy atom", // the counting heuristic
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("brief is missing %q; full text:\n%s", want, got)
+		}
+	}
+
+	// The target band must sit strictly inside the window, or the advice contradicts the gate.
+	if !strings.Contains(got, "430–620 Da") {
+		t.Errorf("brief never states the window itself:\n%s", got)
+	}
+}
+
+// A site with no anchors must not emit an empty calibration list.
+func TestWeightGateOmitsAnchorsWhenAbsent(t *testing.T) {
+	var b strings.Builder
+	writeWeightGate(&b, &SiteGuidance{MinMW: 300, MaxMW: 500})
+	if strings.Contains(b.String(), "Calibrate against real masses") {
+		t.Errorf("anchor block emitted with no anchors:\n%s", b.String())
 	}
 }
