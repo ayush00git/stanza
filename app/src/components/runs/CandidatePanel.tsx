@@ -250,9 +250,12 @@ export default function CandidatePanel({
           <span className="mt-1.5 h-1.5 w-1.5 flex-none rounded-full bg-accent" />
           <p className="text-xs leading-relaxed text-ink">
             <span className="font-medium text-accent">Feedback round.</span> Every molecule
-            you've docked is fed back to Claude, ranked by which warhead best reached{' '}
-            {covalentResidue ?? 'the target residue'} — so the next batch is designed against
-            measured geometry, not a blank pocket. Regenerate to close the loop.
+            you've docked is fed back to Claude,{' '}
+            {covalentResidue
+              ? `ranked by which warhead best reached ${covalentResidue}`
+              : 'ranked by measured selectivity'}{' '}
+            — so the next batch is designed against measured results, not a blank pocket.
+            Regenerate to close the loop.
           </p>
         </div>
       )}
