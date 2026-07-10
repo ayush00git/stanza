@@ -216,7 +216,31 @@ func writeCovalentBrief(b *strings.Builder, covalentResidue string, site *KnownS
 	if site != nil && site.Guidance != nil {
 		g := site.Guidance
 		fmt.Fprintf(b, "\nWhere selectivity comes from:\n%s\n", g.Mechanism)
-		fmt.Fprintf(b, "\nWhat a potent ligand must carry here:\n- %s\n", g.Pharmacophore)
+	}
+
+	// Reach is stated FIRST and as a hard gate, because it is the requirement the model
+	// silently drops. Told the pocket-filler was "the single largest potency driver", it
+	// optimised the filler and let the warhead drift 5-8 Å from the thiol: across a docked
+	// batch, every molecule that filled the His95 groove left its warhead too far to bond,
+	// scoring feasibility 0. Reach and the filler pull in opposite directions, and the
+	// prompt has to say so or the model resolves the tension the wrong way every time.
+	fmt.Fprintf(b, "\nHARD REQUIREMENT #1 — the warhead MUST reach %s.\n"+
+		"A warhead that cannot touch the thiol is worthless no matter how well the rest of the molecule "+
+		"binds. Put the warhead on a SHORT, direct linker — about two to four bonds off the core — so its "+
+		"electrophilic carbon sits within ~3.5–4.0 Å of %s and approaches at roughly 105° for a Michael "+
+		"acceptor (acrylamide, substituted acrylamide, cyanoacrylamide, vinyl sulfonamide, propiolamide) "+
+		"or collinear for an SN2 haloacetamide. A warhead dangling from a long or branched tether will not "+
+		"reach. Vary the warhead class across your candidates; do not send six acrylamides.\n", covalentResidue, covalentResidue)
+
+	if site != nil && site.Guidance != nil {
+		g := site.Guidance
+		// The pharmacophore is HARD REQUIREMENT #2, but framed so it cannot displace #1: the
+		// groove substituent extends the OTHER way, toward His95, not back through the anchor.
+		fmt.Fprintf(b, "\nHARD REQUIREMENT #2 — fill the pocket, WITHOUT pushing the warhead away.\n- %s\n"+
+			"This substituent and the warhead occupy OPPOSITE ends of the pocket: the group that fills the "+
+			"His95 groove must extend AWAY from %s, on a different vector than the warhead, never on the linker "+
+			"that carries it. If both will not fit, keep the warhead in reach and make the filler smaller — a "+
+			"molecule that fills the groove but cannot bond the cysteine scores zero.\n", g.Pharmacophore, covalentResidue)
 		if g.MinMW > 0 && g.MaxMW > 0 {
 			writeWeightGate(b, g)
 		}
@@ -227,11 +251,6 @@ func writeCovalentBrief(b *strings.Builder, covalentResidue string, site *KnownS
 			}
 		}
 	}
-
-	fmt.Fprintf(b, "\nEvery candidate must carry a cysteine-reactive warhead (acrylamide, substituted acrylamide, "+
-		"cyanoacrylamide, vinyl sulfonamide, propiolamide or haloacetamide) positioned so its electrophilic carbon "+
-		"can reach %s and attack it along a viable trajectory — roughly 105° onto a Michael acceptor's β-carbon, "+
-		"or collinear for SN2. Vary the warhead class; do not send six acrylamides.\n", covalentResidue)
 }
 
 // writeHistory shows what was measured, ordered by the quantity worth optimising.
