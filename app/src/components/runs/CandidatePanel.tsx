@@ -239,18 +239,22 @@ export default function CandidatePanel({
         </div>
       </div>
 
-      {/* Once molecules have been docked, regeneration is a feedback round: the docked
-          results (ranked by covalent feasibility) travel back into the design prompt, so
-          Claude sees which warheads actually reached the thiol and which missed. This
-          states the MECHANISM — what is fed back — not an outcome. Whether the next batch
-          scores higher is a measured question, and the leaderboard is where it is read. */}
+      {/* Once molecules have been docked, regeneration is a feedback round: every docked
+          result (ranked by covalent feasibility) travels back into the design prompt, so
+          Claude sees which warheads actually reached the thiol and which missed. This is
+          the headline capability, so it is highlighted rather than muted. It states the
+          MECHANISM — what is fed back — not an outcome: whether the next batch scores
+          higher is a measured question, and the leaderboard is where it is read. */}
       {!generating && dockedCount > 0 && (
-        <p className="mt-3 text-xs leading-relaxed text-muted">
-          <span className="text-ink">Feedback round:</span> regenerating shows Claude the{' '}
-          {dockedCount === 1 ? 'molecule' : `${dockedCount} molecules`} you've docked, ranked
-          by which warhead best reached {covalentResidue ?? 'the target residue'} — so it
-          designs against measured geometry, not a blank pocket.
-        </p>
+        <div className="mt-3 flex items-start gap-2.5 rounded-md border border-accent/40 bg-accent-soft px-3.5 py-2.5">
+          <span className="mt-1.5 h-1.5 w-1.5 flex-none rounded-full bg-accent" />
+          <p className="text-xs leading-relaxed text-ink">
+            <span className="font-medium text-accent">Feedback round.</span> Every molecule
+            you've docked is fed back to Claude, ranked by which warhead best reached{' '}
+            {covalentResidue ?? 'the target residue'} — so the next batch is designed against
+            measured geometry, not a blank pocket. Regenerate to close the loop.
+          </p>
+        </div>
       )}
 
       {generateError && <p className="mt-3 text-sm text-conf-verylow">{generateError}</p>}
