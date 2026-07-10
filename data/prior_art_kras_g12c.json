@@ -1,0 +1,17 @@
+{
+  "_comment": "Canonical structures for the published KRAS switch-II inhibitors named in services/known_sites.go PriorArt. Fetched from PubChem PUG-REST by CID on 2026-07-10. Do not hand-edit the SMILES: re-fetch by CID. The inchikey_skeleton is the first InChIKey block (connectivity only) and is what novelty checks compare against.",
+  "source": "https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/{cid}/property/IsomericSMILES/TXT",
+  "fetched": "2026-07-10",
+  "compounds": [
+    {"name": "sotorasib", "aka": "AMG 510", "cid": 137278711, "mw": 560.6,
+     "smiles": "C[C@H]1CN(CCN1C2=NC(=O)N(C3=NC(=C(C=C32)F)C4=C(C=CC=C4F)O)C5=C(C=CN=C5C(C)C)C)C(=O)C=C"},
+    {"name": "adagrasib", "aka": "MRTX849", "cid": 138611145, "mw": 604.1,
+     "smiles": "CN1CCC[C@H]1COC2=NC3=C(CCN(C3)C4=CC=CC5=C4C(=CC=C5)Cl)C(=N2)N6CCN([C@H](C6)CC#N)C(=O)C(=C)F"},
+    {"name": "divarasib", "aka": "GDC-6036", "cid": 146624881, "mw": 622.1,
+     "smiles": "C[C@H]1CN(CCN1C2=NC(=NC3=C(C(=C(C=C32)Cl)C4=C(C(=CC(=N4)N)C)C(F)(F)F)F)OC[C@@H]5CCCN5C)C(=O)C=C"},
+    {"name": "ARS-1620", "cid": 137003167, "mw": 430.8,
+     "smiles": "C=CC(=O)N1CCN(CC1)C2=NC=NC3=C(C(=C(C=C32)Cl)C4=C(C=CC=C4F)O)F"},
+    {"name": "ARS-853", "cid": 86279165, "mw": 432.9,
+     "smiles": "CC1(CC1)C2=CC(=C(C=C2Cl)O)NCC(=O)N3CCN(CC3)C4CN(C4)C(=O)C=C"}
+  ]
+}
