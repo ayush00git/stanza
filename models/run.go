@@ -67,12 +67,23 @@ type PocketAnalysis struct {
 // LigandDock is one molecule docked into both tracks of a run (Stage 4): the
 // resistance pocket of the WT structure and of the mutant structure.
 type LigandDock struct {
-	SMILES        string  `json:"smiles"`
-	WTScore       float64 `json:"wt_score"`     // Vina affinity (kcal/mol); more negative = stronger
-	MutantScore   float64 `json:"mutant_score"` // raw mutant Vina affinity; never covalent-adjusted
-	Selectivity   float64 `json:"selectivity"`  // wt_score - mutant_score; large positive spares WT
-	WTPosePDB     string  `json:"wt_pose_pdb,omitempty"`
-	MutantPosePDB string  `json:"mutant_pose_pdb,omitempty"`
+	SMILES      string  `json:"smiles"`
+	WTScore     float64 `json:"wt_score"`     // best Vina affinity over seeds (kcal/mol); more negative = stronger
+	MutantScore float64 `json:"mutant_score"` // raw mutant Vina affinity; never covalent-adjusted
+	Selectivity float64 `json:"selectivity"`  // wt_score - mutant_score; large positive spares WT
+	// WTSpread and MutantSpread are max − min affinity across the docking seeds of that
+	// track. They are the error bars on Selectivity, and without them the margin is
+	// unreadable: a molecule once reported +2.39 whose wild-type track was bimodal, its
+	// deep pose found by 1 seed in 7. The two pockets bound it to within 0.19 kcal/mol.
+	// Zero on rows docked before spreads were recorded — see Replicates.
+	WTSpread     float64 `json:"wt_spread,omitempty"`
+	MutantSpread float64 `json:"mutant_spread,omitempty"`
+	// Replicates is how many seeds each track was docked with. Zero identifies a row
+	// written before the estimator carried its noise, whose spreads are unknown rather
+	// than zero — a distinction the UI must not flatten.
+	Replicates    int    `json:"replicates,omitempty"`
+	WTPosePDB     string `json:"wt_pose_pdb,omitempty"`
+	MutantPosePDB string `json:"mutant_pose_pdb,omitempty"`
 	// Covalent is set whenever a warhead-bearing molecule is docked against a mutated
 	// cysteine, whatever the outcome — see the Covalent* status constants. It never
 	// alters MutantScore: the covalent bond is not a Vina energy and folding a

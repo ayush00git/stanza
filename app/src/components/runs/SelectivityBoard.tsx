@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react'
-import { type CovalentDock, type DockPartial, type DockProgress, type Ranking } from '../../lib/api'
+import { type CovalentDock, type DockPartial, type DockProgress, type Ranking,
+  selectivityResolved,
+} from '../../lib/api'
 import CovalentBadge from './CovalentBadge'
 
 type Props = {
@@ -81,7 +83,7 @@ function DockingRow({
                 label="Mutant affinity"
                 value={affinity(partial.mutant_score)}
                 unit="kcal/mol"
-                hint="AutoDock Vina affinity against the mutant pocket, median over the replicate seeds. Raw — no covalent term is folded in."
+                hint="AutoDock Vina affinity against the mutant pocket — the deepest pose found across the replicate seeds. Raw: no covalent term is folded in."
               />
             )}
             {partial.selectivity != null && (
@@ -113,7 +115,26 @@ function affinity(x: number): string {
 }
 
 const SELECTIVITY_NOTE =
-  'Selectivity = WT affinity − mutant affinity. For a covalent target it is expected to be ≈0: swapping Gly12 for Cys12 barely changes the pocket shape, so a ligand binds both forms equally well. Real selectivity comes from the covalent bond, which only the mutant can form — see feasibility.'
+  'Selectivity = WT affinity − mutant affinity. For a covalent target it is expected to be ≈0: swapping Gly12 for Cys12 barely changes the pocket shape, so a ligand binds both forms equally well. Real selectivity comes from the covalent bond, which only the mutant can form — see feasibility. Each affinity is the deepest pose found across docking seeds; the seed-to-seed spread is the error bar on this margin.'
+
+/**
+ * The caption under Selectivity. Three states, and conflating them is what hid a bug:
+ * a margin that beats its own search noise, one that does not (Vina found different
+ * basins on different seeds, so the number describes the search rather than the
+ * receptor), and one docked before spreads were recorded — unknown, not fine.
+ */
+function selectivityNote(
+  s: { selectivity: number; wt_spread?: number; mutant_spread?: number; replicates?: number },
+  covalentRun: boolean,
+): string | undefined {
+  const resolved = selectivityResolved(s)
+  if (resolved === false) {
+    const noise = Math.max(s.wt_spread ?? 0, s.mutant_spread ?? 0)
+    return `below seed noise (±${noise.toFixed(2)}) — not resolved`
+  }
+  if (resolved === null) return covalentRun ? 'expected ≈0 here · spread not recorded' : 'spread not recorded'
+  return covalentRun ? 'expected ≈0 here' : undefined
+}
 
 const FEASIBILITY_NOTE =
   'Covalent feasibility, 0–1 and dimensionless. Can the warhead reach the cysteine thiol and attack it along a viable trajectory? It is a geometry score, NOT an energy: covalent potency is kinetic (kinact/KI) and cannot be expressed in kcal/mol.'
@@ -310,21 +331,31 @@ export default function SelectivityBoard({ ranking, status, error, activeSmiles,
                         label="Wild-type affinity"
                         value={affinity(s.wt_score)}
                         unit="kcal/mol"
-                        hint="AutoDock Vina affinity against the wild-type pocket. More negative = binds tighter."
+                        hint="AutoDock Vina affinity against the wild-type pocket — the deepest pose found across seeds. More negative = binds tighter."
+                        note={s.wt_spread ? `spread ${s.wt_spread.toFixed(2)}` : undefined}
                       />
                       <Stat
                         label="Mutant affinity"
                         value={affinity(s.mutant_score)}
                         unit="kcal/mol"
-                        hint="AutoDock Vina affinity against the mutant pocket. Raw — no covalent term is folded in."
+                        hint="AutoDock Vina affinity against the mutant pocket — the deepest pose found across seeds. Raw: no covalent term is folded in."
+                        note={s.mutant_spread ? `spread ${s.mutant_spread.toFixed(2)}` : undefined}
                       />
                       <Stat
                         label="Selectivity"
                         value={signed(s.selectivity)}
                         unit="kcal/mol"
                         hint={SELECTIVITY_NOTE}
-                        tone={covalentRun ? 'text-muted' : s.selectivity > 0.3 ? 'text-accent' : 'text-ink'}
-                        note={covalentRun ? 'expected ≈0 here' : undefined}
+                        tone={
+                          selectivityResolved(s) === false
+                            ? 'text-muted'
+                            : covalentRun
+                              ? 'text-muted'
+                              : s.selectivity > 0.3
+                                ? 'text-accent'
+                                : 'text-ink'
+                        }
+                        note={selectivityNote(s, covalentRun)}
                       />
                       {s.covalent && <CovalentStats c={s.covalent} />}
                       {s.qed != null && (

@@ -532,9 +532,32 @@ export type LigandDock = {
   wt_score: number
   mutant_score: number
   selectivity: number
+  /** max − min affinity across that track's docking seeds: the error bar on selectivity. */
+  wt_spread?: number
+  mutant_spread?: number
+  /** Seeds each track was docked with. Absent/0 on rows docked before spreads were recorded. */
+  replicates?: number
   wt_pose_pdb?: string
   mutant_pose_pdb?: string
   covalent?: CovalentDock
+}
+
+/**
+ * Is a selectivity margin larger than the search noise that produced it?
+ *
+ * Returns null when the dock predates spread recording — unknown, not resolved. A
+ * molecule once read +2.39 with a bimodal wild-type track whose deep pose one seed in
+ * seven found; the two pockets bound it to within 0.19 kcal/mol. A margin smaller than
+ * its own spread says nothing about the receptor.
+ */
+export function selectivityResolved(d: {
+  selectivity: number
+  wt_spread?: number
+  mutant_spread?: number
+  replicates?: number
+}): boolean | null {
+  if (!d.replicates || d.wt_spread == null || d.mutant_spread == null) return null
+  return Math.abs(d.selectivity) > Math.max(d.wt_spread, d.mutant_spread)
 }
 
 /** A Claude-proposed molecule that passed RDKit validation (Stage 5/6). Mirrors models.Candidate. */
@@ -570,6 +593,11 @@ export type Scores = {
   mutant_score: number
   wt_score: number
   selectivity: number
+  /** max − min affinity over that track's docking seeds: the error bar on selectivity. */
+  wt_spread?: number
+  mutant_spread?: number
+  /** Seeds per track. Absent/0 on docks recorded before spreads existed — unknown, not zero. */
+  replicates?: number
   qed?: number | null
   fitness?: number | null
   status: 'scored' | 'incomplete' | string

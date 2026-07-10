@@ -71,11 +71,17 @@ type Options struct {
 // beside the derived ones so a pool can be re-weighted or re-normalised without
 // re-docking.
 type Scores struct {
-	SMILES      string   `json:"smiles"`
-	MutantScore float64  `json:"mutant_score"` // raw Vina affinity into the MUTANT pocket (kcal/mol); no covalent credit
-	WTScore     float64  `json:"wt_score"`     // kcal/mol into the WT pocket
-	Selectivity float64  `json:"selectivity"`  // wt_score − mutant_score (real non-covalent margin; ~0 for covalent targets)
-	QED         *float64 `json:"qed"`          // drug-likeness (05); nil when unknown for this molecule
+	SMILES      string  `json:"smiles"`
+	MutantScore float64 `json:"mutant_score"` // raw Vina affinity into the MUTANT pocket (kcal/mol); no covalent credit
+	WTScore     float64 `json:"wt_score"`     // kcal/mol into the WT pocket
+	Selectivity float64 `json:"selectivity"`  // wt_score − mutant_score (real non-covalent margin; ~0 for covalent targets)
+	// WTSpread/MutantSpread are the max − min affinity over each track's docking seeds:
+	// the error bars on Selectivity. A margin smaller than its own spread reports the
+	// search, not the receptor. Zero when the dock predates spread recording (Replicates 0).
+	WTSpread     float64  `json:"wt_spread,omitempty"`
+	MutantSpread float64  `json:"mutant_spread,omitempty"`
+	Replicates   int      `json:"replicates,omitempty"`
+	QED          *float64 `json:"qed"` // drug-likeness (05); nil when unknown for this molecule
 	// CovalentFeasibility is the MEASURED covalent-attack feasibility (0–1) reported for
 	// display, mirrored from Covalent.Feasibility; nil for non-covalent molecules. Note
 	// this is the measured value even when the call is Uncertain — the UI should show it —
@@ -194,6 +200,9 @@ func ScoreAndRank(runID string, docks []models.LigandDock, qedBySMILES map[strin
 			MutantScore:         d.MutantScore,
 			WTScore:             d.WTScore,
 			Selectivity:         d.Selectivity,
+			WTSpread:            d.WTSpread,
+			MutantSpread:        d.MutantSpread,
+			Replicates:          d.Replicates,
 			QED:                 qptr,
 			CovalentFeasibility: cfptr,
 			Status:              "scored",

@@ -104,15 +104,18 @@ func DockLigandDualTrackProgress(ctx context.Context, run *models.Run, smiles st
 	step("ligand", "3D conformer prepared", nil)
 
 	// Both tracks share the ligand, the box and the seed list, so a WT/mutant affinity
-	// difference can only come from the receptor — and each is a median, so neither can be
-	// set by a single seed that landed in a bad local minimum.
+	// difference can only come from the receptor — provided the search found each track's
+	// deepest pose. It does not always: see bestReplicate. The per-track spread over seeds
+	// is carried alongside the score so a margin can be read against the noise that
+	// produced it, rather than in place of it.
 	wt, err := dockTrack(run.ID, "wt", ligPDBQT, pocket, filepath.Join(tmp, "wt"), screenSeeds, nil)
 	if err != nil {
 		return nil, fmt.Errorf("dock: WT track: %w", err)
 	}
-	wtBest := medianReplicate(wt)
+	wtBest := bestReplicate(wt)
 	wtScore := round2(wtBest.affinity)
-	step("wt", fmt.Sprintf("wild-type affinity %.2f kcal/mol (median of %d seeds)", wtScore, len(wt)),
+	wtSpread := round2(spread(affinities(wt)))
+	step("wt", fmt.Sprintf("wild-type affinity %.2f kcal/mol (best of %d seeds, spread %.2f)", wtScore, len(wt), wtSpread),
 		&models.DockPartial{WTScore: &wtScore})
 
 	mutDir := filepath.Join(tmp, "mutant")
@@ -125,16 +128,20 @@ func DockLigandDualTrackProgress(ctx context.Context, run *models.Run, smiles st
 		return nil, fmt.Errorf("dock: mutant track: %w", err)
 	}
 
-	mutBest := medianReplicate(mut)
+	mutBest := bestReplicate(mut)
 	mutScore := round2(mutBest.affinity)
+	mutSpread := round2(spread(affinities(mut)))
 	selectivity := round2(wtScore - mutScore)
-	step("mutant", fmt.Sprintf("mutant affinity %.2f kcal/mol (median of %d seeds)", mutScore, len(mut)),
+	step("mutant", fmt.Sprintf("mutant affinity %.2f kcal/mol (best of %d seeds, spread %.2f)", mutScore, len(mut), mutSpread),
 		&models.DockPartial{MutantScore: &mutScore, Selectivity: &selectivity})
 
 	dock := &models.LigandDock{
 		SMILES:        smiles,
 		WTScore:       wtScore,
 		MutantScore:   mutScore,
+		WTSpread:      wtSpread,
+		MutantSpread:  mutSpread,
+		Replicates:    len(screenSeeds),
 		WTPosePDB:     wtBest.posePDB,
 		MutantPosePDB: mutBest.posePDB,
 	}
@@ -211,12 +218,36 @@ type replicate struct {
 	posePDBQT string
 }
 
-// medianReplicate returns the replicate with the median affinity — a summary that a
-// single outlying seed cannot drag around, unlike the mean or the best score.
-func medianReplicate(reps []replicate) replicate {
-	sorted := slices.Clone(reps)
-	slices.SortFunc(sorted, func(a, b replicate) int { return cmp.Compare(a.affinity, b.affinity) })
-	return sorted[len(sorted)/2]
+// bestReplicate returns the replicate with the LOWEST affinity — the deepest pose any
+// seed found.
+//
+// This was a median until a molecule read selectivity +2.39 against a mutation that
+// cannot change reversible binding. Seven seeds explained it: BOTH tracks were bimodal,
+// and the mutant track found its deep basin (≈ −9.35) in 5 of 7 seeds while the wild-type
+// track found its own deep basin (−9.23) in 1 of 7. The pockets bound the ligand almost
+// identically; Vina's SEARCH found one pose more often than the other. A median reports
+// the basin the search lands in most often. Their true minima differ by 0.19 kcal/mol —
+// which is the ≈0 the covalent theory demands.
+//
+// Vina is a minimiser. Its affinity estimates a global minimum, so a low outlier is not
+// noise to be resisted — it is the best available estimate of the answer, and discarding
+// it manufactures selectivity out of sampling asymmetry between the two tracks.
+//
+// Best-of-N is downward-biased (more seeds, more chances to find a deeper pose). That
+// bias cancels in wt − mut only when both tracks are equally searchable, which is exactly
+// what fails here — so the spread over seeds travels with the score, and a caller that
+// wants to know whether to trust a margin must look at it.
+func bestReplicate(reps []replicate) replicate {
+	return slices.MinFunc(reps, func(a, b replicate) int { return cmp.Compare(a.affinity, b.affinity) })
+}
+
+// affinities extracts the per-seed affinities of a track, for spread reporting.
+func affinities(reps []replicate) []float64 {
+	out := make([]float64, len(reps))
+	for i, r := range reps {
+		out[i] = r.affinity
+	}
+	return out
 }
 
 // median of a float sample, and the spread (max − min) of that sample.
@@ -339,11 +370,11 @@ func assessCovalentGeometry(ctx context.Context, run *models.Run, smiles string,
 		return cov
 	}
 
-	// Build the tether from the median-affinity replicate, the same pose the viewer
-	// shows. It only supersedes the docked pose when the helper actually closed the
-	// S–C bond without driving the ligand into the receptor.
+	// Build the tether from the best-affinity replicate, the same pose the viewer shows.
+	// It only supersedes the docked pose when the helper actually closed the S–C bond
+	// without driving the ligand into the receptor.
 	tetherOut := filepath.Join(outDir, "tether.pdb")
-	if a, err := assessCovalent(ctx, smiles, medianReplicate(reps).posePDBQT,
+	if a, err := assessCovalent(ctx, smiles, bestReplicate(reps).posePDBQT,
 		RunStructurePath(run.ID, "mutant"),
 		run.Mutagenesis.TargetChain, run.Mutagenesis.TargetResidueNum,
 		tetherOut); err == nil {

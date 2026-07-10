@@ -65,7 +65,7 @@ blind to that. **Right answer, right reason, wrong size:** trust the sign and th
 never the number. Method, caveats and the metric that flattered the pose by 1.8×:
 [`docs/features/11-abl-t315i-positive-control.md`](docs/features/11-abl-t315i-positive-control.md).
 
-**Three places this project proved its own headline numbers wrong** — the detail is in
+**Four places this project proved its own headline numbers wrong** — the detail is in
 [Limitations](#limitations--roadmap), and it is the reason to trust the rest:
 
 | # | The claim | What measurement showed |
@@ -73,6 +73,7 @@ never the number. Method, caveats and the metric that flattered the pose by 1.8�
 | 1 | Covalent selectivity is worth **+2.2 kcal/mol** | It was a *constant* wearing an energy's units. Since WT and mutant bind alike non-covalently, `selectivity = wt − (mut − credit)` collapsed to `selectivity = credit`. Deleted end to end; covalent evidence is now a dimensionless feasibility ∈ [0,1] reported *beside* the affinity. |
 | 2 | The generator produces **novel molecules** | It produces novel *scaffolds*. 41/41 pass, zero Murcko collisions, max Tanimoto 0.485 — but a Murcko scaffold strips side chains, so it strips the warhead. 80% carry the same N-acyl saturated N-heterocycle all five reference drugs carry. The honest claim is **"novel scaffolds bearing conventional warhead chemistry."** (Aspirin also scores `novel_scaffold`, at Tanimoto 0.097, and cannot reach Cys12.) |
 | 3 | **`feasibility = 1.00`** means the warhead can bond | On 4 of 5 molecules, the stronger check disagrees. Building the actual covalent adduct succeeds for exactly **one** molecule — the one scoring **0.10**. The molecule scoring 1.00 clashes worst, at 1.32 Å. This is a **live, unfixed defect** in a term carrying 0.40 of the fitness weight. It is surfaced, not folded in. |
+| 4 | The **median over seeds** controls docking noise | It creates it. A molecule read selectivity **+2.39** against a mutation that cannot change reversible binding; seven seeds showed both tracks bimodal, with the wild type finding its deep pose in **1 seed of 7**. True margin: **+0.19**. Vina is a minimiser, so the deepest pose is the estimate and a low outlier is the *answer*, not noise. Now best-of-seeds, with each track's spread published as the error bar, and any margin below its own spread labelled **not resolved**. |
 
 A fourth, found in our own test suite: the SMILES for sotorasib, adagrasib and ARS-1620 that
 guarded the pre-filter were **hand-typed fabrications** — plausible molecules that were not
@@ -98,12 +99,17 @@ barely perturbs the reversible contact set, so the two tracks usually agree to w
 ~0.1 kcal/mol. Non-covalent docking cannot separate them on the mechanism that matters.
 
 It is *uninformative*, not *zero*. Across seven in-window molecules docked into 6OIM, the
-margin ran from **−0.83 to +0.30 kcal/mol** (median +0.08). Five sit inside ±0.3; the
-outlier is the bulkiest, most rigid ligand. The Cys12 side chain shrinks the pocket by
-~48 Å³ (fpocket, Δvolume), so a ligand that fills it can genuinely prefer wild-type on
-sterics alone. A large `|selectivity|` therefore reports **steric fit**, never covalent
-discrimination — reading it as the latter is the exact error the removed "covalent
-credit" institutionalised.
+margin ran from **−0.83 to +0.30 kcal/mol** (median +0.08) — but **those docks used the old
+median-over-seeds estimator** and have not been re-run, so the tails of that range are not
+trustworthy. The estimator that produced them manufactured a +2.39 on an eighth molecule
+whose two pockets agree to 0.19 kcal/mol (see [Determinism](#determinism-and-noise-control)).
+Treat the ≈0 centre as the claim and the tails as unmeasured.
+
+Where a margin *is* real, it reports sterics. The Cys12 side chain shrinks the pocket by
+~48 Å³ (fpocket, Δvolume), so a ligand that fills it can genuinely prefer wild-type. A large
+`|selectivity|` therefore reports **steric fit**, never covalent discrimination — reading it
+as the latter is the exact error the removed "covalent credit" institutionalised. A margin
+smaller than its own seed spread reports neither, and the board says so.
 
 **2. The covalent signal is a dimensionless feasibility ∈ [0,1], reported *beside* the
 affinity and never folded into it.** It is measured from the docked geometry
@@ -176,10 +182,26 @@ that drops the approved drug cannot judge a molecule designed to resemble it.
   (`scripts/ligprep.py`). `obabel --gen3d` is unseeded and returned a different structure
   every call, which mattered for the covalent reach distance.
 - **Both tracks are docked under the same replicate seeds** (`{42, 1337, 7}`, three), and
-  every reported affinity is the **median**. Vina's search occasionally settles in a bad
-  local minimum per (molecule, receptor, seed); a single-seed answer once reported an
-  outlier as fact — a molecule whose true margin is +0.09 kcal/mol was published at +1.03.
-  Replicates run concurrently in a bounded pool.
+  every reported affinity is the **deepest pose any seed found**, published with that
+  track's seed-to-seed spread as its error bar. Replicates run concurrently in a bounded
+  pool.
+
+  This was a median until a molecule read selectivity **+2.39** against a mutation that
+  cannot change reversible binding. Seven seeds per track explained it: *both* tracks were
+  bimodal, the mutant found its deep basin (≈ −9.35) in 5 seeds of 7, the wild type found
+  its own (−9.23) in **1 of 7**. The pockets bind that ligand to within **0.19 kcal/mol**.
+  The median reported whichever basin the search preferred, and manufactured 2.2 kcal/mol
+  of selectivity out of sampling asymmetry between two tracks that were never equally
+  searchable. Across all 35 three-seed subsets the median answer ranged +0.21 … +2.34.
+
+  Vina is a **minimiser**: its affinity estimates a global minimum, so a low outlier is not
+  noise to be resisted — it is the best available estimate of the answer. A minimum still
+  discards the *shallow* outlier that produced the original phantom +1.03 (a shallow pose is
+  never the deepest one), so best-of-seeds fixes that case too. It is downward-biased with
+  more seeds, and that bias only cancels in `wt − mut` when both tracks are equally
+  searchable — which is exactly what failed here. Hence the spread travels with the score,
+  and a margin smaller than its own spread is labelled **not resolved** rather than reported
+  as a finding.
 - **Exhaustiveness is 16**, twice Vina's default. At 8 the search is *bimodal* on some
   ligands: it finds either a deep pose with the warhead 5.8 Å from the thiol or a
   shallower one at 3.85 Å, and the covalent verdict follows whichever it found. Seeds

@@ -109,20 +109,23 @@ func TestMedianAndSpread(t *testing.T) {
 	}
 }
 
-func TestMedianReplicatePicksMiddleAffinity(t *testing.T) {
+// Vina is a minimiser: its affinity estimates a global minimum, so the deepest pose any
+// seed found is the best available estimate of it. The seed that found it is the one whose
+// pose the viewer shows and the tether is built from.
+func TestBestReplicatePicksTheDeepestPose(t *testing.T) {
 	reps := []replicate{
-		{seed: 1, affinity: -9.5},
+		{seed: 1, affinity: -9.5}, // deepest
 		{seed: 2, affinity: -7.1},
-		{seed: 3, affinity: -8.3}, // median
+		{seed: 3, affinity: -8.3},
 		{seed: 4, affinity: -8.9},
 		{seed: 5, affinity: -7.7},
 	}
-	got := medianReplicate(reps)
-	if got.seed != 3 {
-		t.Errorf("medianReplicate seed = %d, want 3 (affinity -8.3)", got.seed)
+	got := bestReplicate(reps)
+	if got.seed != 1 {
+		t.Errorf("bestReplicate seed = %d, want 1 (affinity -9.5)", got.seed)
 	}
-	if reps[0].seed != 1 {
-		t.Error("medianReplicate reordered the caller's slice")
+	if reps[0].seed != 1 || reps[1].seed != 2 {
+		t.Error("bestReplicate reordered the caller's slice")
 	}
 }
 
@@ -177,22 +180,62 @@ func TestScreenSeedsAreOddDistinctAndSharedByBothTracks(t *testing.T) {
 	}
 }
 
-// The median must reject a single outlying seed. This is the exact wild-type sample that
-// produced the phantom +1.03 selectivity: four seeds agreeing near −9.8, and seed 42 a
-// full kcal/mol shallower.
-func TestMedianRejectsASingleOutlyingSeed(t *testing.T) {
+// A SHALLOW outlying seed must never be reported. This is the exact wild-type sample that
+// produced the phantom +1.03 selectivity: two seeds agreeing near −9.8, and seed 42 a full
+// kcal/mol shallower. A minimum discards it for free — a shallow pose is never the deepest
+// one — which is why best-of-seeds fixes this case as well as the median ever did.
+func TestBestOfSeedsRejectsAShallowOutlier(t *testing.T) {
 	wt := []replicate{
 		{seed: 42, affinity: -8.75}, // the outlier a single-seed track would have reported
 		{seed: 1337, affinity: -9.80},
 		{seed: 7, affinity: -9.77},
 	}
-	got := medianReplicate(wt).affinity
-	if got != -9.77 {
-		t.Errorf("median affinity = %v, want -9.77 (the outlier -8.75 must not be reported)", got)
+	got := bestReplicate(wt).affinity
+	if got != -9.80 {
+		t.Errorf("best affinity = %v, want -9.80 (the shallow outlier -8.75 must not be reported)", got)
 	}
-	// Selectivity against the mutant's own median (-9.86) is then +0.09, not +1.03.
-	if sel := round2(got - (-9.86)); sel != 0.09 {
-		t.Errorf("selectivity = %v, want 0.09", sel)
+	// Selectivity against the mutant's own best (-9.86) is +0.06, not +1.03.
+	if sel := round2(got - (-9.86)); sel != 0.06 {
+		t.Errorf("selectivity = %v, want 0.06", sel)
+	}
+}
+
+// The case the median could not survive, in the numbers that exposed it.
+//
+// One molecule reported selectivity +2.39 against Gly12→Cys12 — a mutation that cannot
+// change reversible binding. Docking it with seven seeds per track showed BOTH tracks were
+// bimodal: the mutant found its deep basin (≈ −9.35) in five seeds of seven, the wild type
+// found its own deep basin (−9.23) in one of seven. The pockets bind this ligand to within
+// 0.19 kcal/mol. The median reported whichever basin the search happened to prefer, and
+// manufactured 2.2 kcal/mol of selectivity out of that asymmetry.
+func TestBestOfSeedsResolvesABimodalWildTypeTrack(t *testing.T) {
+	// Measured, not invented: exhaustiveness 16, cpu 2, seeds as labelled.
+	wt := []replicate{
+		{seed: 42, affinity: -6.93}, {seed: 1337, affinity: -7.46}, {seed: 7, affinity: -7.47},
+		{seed: 2024, affinity: -7.45}, {seed: 101, affinity: -6.93}, {seed: 555, affinity: -6.96},
+		{seed: 909, affinity: -9.23}, // the only seed that found the deep wild-type pose
+	}
+	mut := []replicate{
+		{seed: 42, affinity: -7.05}, {seed: 1337, affinity: -9.38}, {seed: 7, affinity: -9.33},
+		{seed: 2024, affinity: -9.42}, {seed: 101, affinity: -7.14}, {seed: 555, affinity: -9.30},
+		{seed: 909, affinity: -9.37},
+	}
+
+	sel := round2(bestReplicate(wt).affinity - bestReplicate(mut).affinity)
+	if sel != 0.19 {
+		t.Errorf("best-of-seeds selectivity = %+.2f, want +0.19 (≈0, as a covalent target requires)", sel)
+	}
+
+	// The spread is what tells a reader this molecule was searched badly. Without it the
+	// margin above is indistinguishable from a margin measured on a unimodal ligand.
+	if s := round2(spread(affinities(wt))); s != 2.30 {
+		t.Errorf("wild-type spread = %.2f, want 2.30", s)
+	}
+
+	// And the median, on the very seeds the pipeline shipped, disagrees with physics.
+	medSel := round2(median(affinities(wt[:3])) - median(affinities(mut[:3])))
+	if medSel < 1.5 {
+		t.Errorf("median-of-3 selectivity = %+.2f; the regression this test guards produced ~+1.9", medSel)
 	}
 }
 
