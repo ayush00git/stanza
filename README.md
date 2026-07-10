@@ -28,6 +28,34 @@ in-memory runs.
 The reference target is **KRAS G12C**, and the interesting part of Stanza is what it does
 *not* claim about it.
 
+## In thirty seconds
+
+**What it is:** a warhead-reach triage filter with auditable error bars. Not a selectivity
+predictor, not an affinity predictor, not a drug-discovery engine.
+
+**What it can claim:** *"Of the molecules proposed, these carry a cysteine-reactive warhead
+that, in a rigid-receptor dock of the sotorasib-opened switch-II pocket, can reach the Cys12
+thiol within van der Waals contact **and** along a Bürgi–Dunitz trajectory that permits
+nucleophilic attack, from a pose the receptor actually holds."* Every number behind that
+sentence — reach, angle, contributing Vina mode, seed-to-seed spread — is inspectable.
+
+**What it cannot claim:** a binding affinity, a covalent selectivity, or a rank order among
+covalent binders (that is kinetic, and feasibility is blind to it).
+
+**Three places this project proved its own headline numbers wrong** — the detail is in
+[Limitations](#limitations--roadmap), and it is the reason to trust the rest:
+
+| # | The claim | What measurement showed |
+|---|---|---|
+| 1 | Covalent selectivity is worth **+2.2 kcal/mol** | It was a *constant* wearing an energy's units. Since WT and mutant bind alike non-covalently, `selectivity = wt − (mut − credit)` collapsed to `selectivity = credit`. Deleted end to end; covalent evidence is now a dimensionless feasibility ∈ [0,1] reported *beside* the affinity. |
+| 2 | The generator produces **novel molecules** | It produces novel *scaffolds*. 41/41 pass, zero Murcko collisions, max Tanimoto 0.485 — but a Murcko scaffold strips side chains, so it strips the warhead. 80% carry the same N-acyl saturated N-heterocycle all five reference drugs carry. The honest claim is **"novel scaffolds bearing conventional warhead chemistry."** (Aspirin also scores `novel_scaffold`, at Tanimoto 0.097, and cannot reach Cys12.) |
+| 3 | **`feasibility = 1.00`** means the warhead can bond | On 4 of 5 molecules, the stronger check disagrees. Building the actual covalent adduct succeeds for exactly **one** molecule — the one scoring **0.10**. The molecule scoring 1.00 clashes worst, at 1.32 Å. This is a **live, unfixed defect** in a term carrying 0.40 of the fitness weight. It is surfaced, not folded in. |
+
+A fourth, found in our own test suite: the SMILES for sotorasib, adagrasib and ARS-1620 that
+guarded the pre-filter were **hand-typed fabrications** — plausible molecules that were not
+those drugs, masses off by 28–109 Da. The test passed anyway. Reference structures now load
+from `data/prior_art_kras_g12c.json`, by PubChem CID. See [Testing](#testing).
+
 ## The covalent-selectivity insight
 
 Read this before trusting any number Stanza prints.
@@ -243,8 +271,17 @@ State these plainly; they are not buried.
   Of the seven in-window molecules docked, five clear the geometry gate — and **only one
   produces a buildable adduct.** The other four clash (1.32–1.82 Å). The molecule scoring a
   perfect `feasibility = 1.00` clashes *worst*; the one that tethers cleanly (S–C 1.89 Å)
-  scores **0.10**. A reach of 3.31 Å is too *close*: closing to a 1.81 Å bond drags the
-  ligand into the pocket wall, while a 3.94 Å pose has room to rotate in.
+  scores **0.10**.
+
+  A tempting explanation is that a short reach is *too* close — that closing to a 1.81 Å
+  bond from 3.31 Å drags the ligand into the pocket wall, while a 3.94 Å pose has room to
+  rotate in. **The data do not support asserting that.** Reach versus minimum contact gives
+  Spearman ρ = 0.70 over n = 5 (exact permutation p = 0.12), and the relationship is not
+  even monotonic: reach 3.54 Å clashes at 1.82 Å while reach 3.68 Å clashes at 1.44 Å. Five
+  ligands, five scaffolds, one success — reach is confounded with everything else that
+  varies. The contradiction between the two checks is a **measured fact**; the mechanism
+  behind it is an **untested hypothesis**, and separating those is the whole point of this
+  section.
 
   `feasibility = distance_score × angle_score` never sees the tether outcome, which is
   recorded only as a `note`. So the 0.40-weight fitness term is ranked on a proxy that the
