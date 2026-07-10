@@ -42,15 +42,28 @@ sentence — reach, angle, contributing Vina mode, seed-to-seed spread — is in
 **What it cannot claim:** a binding affinity, a covalent selectivity, or a rank order among
 covalent binders (that is kinetic, and feasibility is blind to it).
 
-**Validated on a target where the answer is known.** The dual-track machinery was run
-against BCR-ABL **T315I** — a *steric* resistance mutation, the complementary case to KRAS's
-covalent one — with two real drugs and the pass criteria fixed before the docks finished.
-It redocked imatinib to its 1IEP crystal pose at **1.07 Å**, then scored imatinib at
-**−0.35** (defeated by T315I, correct sign) and ponatinib at **+0.45** (survives it) — a
-0.80 kcal/mol separation against 0.13 of seed noise. The magnitude is still wrong: experiment
-says imatinib loses ~4 kcal/mol, and a receptor frozen in DFG-out cannot see the
-conformational half of that mechanism. **Right answer, right reason, wrong size.** Full
-method, numbers and caveats: [`docs/features/11-abl-t315i-positive-control.md`](docs/features/11-abl-t315i-positive-control.md).
+### Validated against a known answer
+
+`selectivity` is structurally ≈0 on KRAS G12C — the mutation's advantage is covalent, not
+shape-based — so that target can never demonstrate the dual-track machinery works. **BCR-ABL
+T315I is the complementary case**: a *steric* resistance mutation, two real drugs, and an
+answer known in advance. Pass criteria were fixed before the docks finished.
+
+| | WT | T315I | selectivity | expected |
+|---|---|---|---|---|
+| **imatinib** | −12.59 | −12.24 | **−0.35** — defeated | negative (loses ~1000×) |
+| **ponatinib** | −11.58 | −12.03 | **+0.45** — survives | ≈ 0 (designed to tolerate it) |
+
+Separation **0.80 kcal/mol** against **0.13** of seed noise (~6×). Imatinib redocks to its
+1IEP crystal pose at **1.07 Å** (symmetry-corrected), so the setup is sound independently of
+the resistance question. **PASS** — on a target the pipeline was never tuned for.
+
+**And the magnitude is wrong.** Experiment puts imatinib's penalty at ~4 kcal/mol; we recover
+0.35, under a tenth. T315I resists only partly by steric bulk — much of it is destabilising
+the DFG-out conformation imatinib requires, and a dock into one frozen frame is architecturally
+blind to that. **Right answer, right reason, wrong size:** trust the sign and the ordering,
+never the number. Method, caveats and the metric that flattered the pose by 1.8×:
+[`docs/features/11-abl-t315i-positive-control.md`](docs/features/11-abl-t315i-positive-control.md).
 
 **Three places this project proved its own headline numbers wrong** — the detail is in
 [Limitations](#limitations--roadmap), and it is the reason to trust the rest:
