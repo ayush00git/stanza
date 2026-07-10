@@ -14,6 +14,18 @@ hydrogen bond from imatinib's anilino NH. Imatinib loses ~1000-fold potency agai
 Two known drugs, one known answer. If the machinery cannot separate them, `selectivity` is
 not measuring anything anywhere.
 
+## Reproducing it
+
+```bash
+scripts/controls/abl_t315i.sh            # ~8 min: fetch 1IEP, build the pair, 12 docks, analyse
+scripts/controls/abl_t315i_analyse.py tmp/abl_control    # re-analyse without re-docking
+```
+
+The script is self-contained: it fetches the structure, derives the box from the crystal
+ligand, and re-verifies the matched pair before reporting. Vina is bit-deterministic given
+(seed, cpu, box, ligand), so the numbers below should reproduce exactly. Completed docks are
+cached — delete `tmp/abl_control/out` to force a re-run.
+
 ## Method
 
 Everything below uses the production settings from `services/dual_dock.go` —
