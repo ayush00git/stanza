@@ -159,31 +159,36 @@ function FeedbackLoop({ covalentResidue }: { covalentResidue?: string | null }) 
         Feedback round
       </div>
 
-      {/* Forward path: three steps, left to right. */}
-      <div className="mt-2.5 flex flex-wrap items-center gap-x-1.5 gap-y-1.5 text-[11px]">
-        <LoopStep n={1} label="Generate" />
-        <span className="text-accent">→</span>
-        <LoopStep n={2} label="Dock" />
-        <span className="text-accent">→</span>
-        <LoopStep n={3} label={reachLabel} />
+      {/* The cycle: 1 → 2 → 3 forward, then a dashed arc 3 → 1 back to the start. The whole
+          diagram is width-capped (max-w) so the return arc keeps an arc's proportions —
+          left unconstrained it stretched to the full panel and blew the arrowhead up into a
+          clunky smear. The arc is the data path (docked results), dashed to read as carried
+          back rather than run automatically; the user closes it by clicking Generate. */}
+      <div className="mt-2.5 max-w-sm">
+        <div className="flex items-center gap-1.5 text-[11px]">
+          <LoopStep n={1} label="Generate" />
+          <span className="text-accent">→</span>
+          <LoopStep n={2} label="Dock" />
+          <span className="text-accent">→</span>
+          <LoopStep n={3} label={reachLabel} />
+        </div>
+        <svg viewBox="0 0 340 30" className="mt-0.5 w-full text-accent" fill="none" aria-hidden="true">
+          <path
+            d="M328 6 Q170 40 14 6"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeDasharray="5 3"
+            strokeLinecap="round"
+          />
+          {/* filled arrowhead into step 1 (bottom-left), pointing up-left */}
+          <path d="M14 6 L22 3 L20 12 Z" fill="currentColor" />
+        </svg>
       </div>
 
-      {/* Return path: a U-shaped bracket from step 3 (right) back under the row to step 1
-          (left), where an arrowhead points up into Generate. Built from CSS borders, not a
-          stretched SVG — it holds its shape and stroke weight at any panel width. Dashed to
-          read as "results carried back", not "runs automatically". */}
-      <div className="relative mx-2 mb-0.5 mt-2 h-6">
-        <div className="absolute inset-0 rounded-b-lg border-x border-b border-dashed border-accent/50" />
-        <span className="absolute -top-1 left-0 h-0 w-0 -translate-x-1/2 border-x-[4px] border-b-[6px] border-x-transparent border-b-accent" />
-        <span className="absolute left-1/2 top-1.5 -translate-x-1/2 whitespace-nowrap text-[10px] leading-none text-accent">
-          docked results carried back
-        </span>
-      </div>
-
-      <p className="mt-2 text-xs leading-relaxed text-ink">
+      <p className="mt-1.5 text-xs leading-relaxed text-ink">
         <span className="font-medium">Every molecule you dock is fed back to Claude.</span>{' '}
         Hit Generate and it re-designs against {rankedBy}, aiming for stronger molecules each
-        round. You drive every turn — nothing runs on its own.
+        round.
       </p>
     </div>
   )
