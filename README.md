@@ -266,6 +266,15 @@ Novelty is audited out-of-band, not in the pipeline:
 echo '{"query":[{"id":"m1","smiles":"..."}]}' | python3 scripts/novelty.py
 ```
 
+The ABL T315I positive control is reproducible from a clean checkout — it fetches the
+structure, builds the matched pair, derives the box from the crystal ligand, and runs the
+12 docks. Nothing is hand-entered, and Vina is deterministic given (seed, cpu, box, ligand),
+so the numbers reproduce bit-for-bit:
+
+```bash
+scripts/controls/abl_t315i.sh            # ~8 min, needs vina + obabel + RDKit/PDBFixer
+```
+
 ## Limitations & roadmap
 
 State these plainly; they are not buried.
