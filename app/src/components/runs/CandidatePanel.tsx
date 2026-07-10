@@ -30,6 +30,10 @@ type Props = {
   onDock: (smiles: string) => void
   /** False while the run isn't ready to generate (e.g. no mutant structure). */
   canGenerate: boolean
+  /** How many molecules have been docked — these are what regeneration feeds back. */
+  dockedCount: number
+  /** The reactive residue, e.g. "Cys12", for the feedback-round copy. */
+  covalentResidue?: string | null
 }
 
 const GEN_COUNTS = [4, 6, 8]
@@ -198,6 +202,8 @@ export default function CandidatePanel({
   dockState,
   onDock,
   canGenerate,
+  dockedCount,
+  covalentResidue,
 }: Props) {
   const [n, setN] = useState(6)
 
@@ -232,6 +238,20 @@ export default function CandidatePanel({
           </button>
         </div>
       </div>
+
+      {/* Once molecules have been docked, regeneration is a feedback round: the docked
+          results (ranked by covalent feasibility) travel back into the design prompt, so
+          Claude sees which warheads actually reached the thiol and which missed. This
+          states the MECHANISM — what is fed back — not an outcome. Whether the next batch
+          scores higher is a measured question, and the leaderboard is where it is read. */}
+      {!generating && dockedCount > 0 && (
+        <p className="mt-3 text-xs leading-relaxed text-muted">
+          <span className="text-ink">Feedback round:</span> regenerating shows Claude the{' '}
+          {dockedCount === 1 ? 'molecule' : `${dockedCount} molecules`} you've docked, ranked
+          by which warhead best reached {covalentResidue ?? 'the target residue'} — so it
+          designs against measured geometry, not a blank pocket.
+        </p>
+      )}
 
       {generateError && <p className="mt-3 text-sm text-conf-verylow">{generateError}</p>}
 

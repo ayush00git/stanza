@@ -353,6 +353,13 @@ export default function RunViewerPage() {
   const targetResidue = run?.mutagenesis
     ? `${run.mutagenesis.wild_type_residue}${run.mutagenesis.target_residue_number} → ${run.mutagenesis.mutant_residue}`
     : null
+
+  // The reactive residue as "Cys12" — a covalent target only, i.e. the mutant residue is
+  // cysteine. Title-cases the 3-letter code (CYS → Cys) for the feedback-round copy.
+  const covalentResidue =
+    run?.mutagenesis?.mutant_residue === 'CYS'
+      ? `Cys${run.mutagenesis.target_residue_number}`
+      : null
   const sourceLabel = run?.wt_structure
     ? run.wt_structure.pdb_id
       ? `PDB ${run.wt_structure.pdb_id}`
@@ -510,6 +517,8 @@ export default function RunViewerPage() {
               validation={validation}
               genProgress={genProgress}
               genChecks={genChecks}
+              dockedCount={docks.length}
+              covalentResidue={covalentResidue}
               onGenerate={handleGenerate}
               dockState={dockState}
               onDock={handleDock}
