@@ -2,7 +2,10 @@ package services
 
 import (
 	"context"
+	"encoding/json"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -114,39 +117,76 @@ func TestValidateSMILESEmptyBatch(t *testing.T) {
 	}
 }
 
+// priorArt is the curated reference set, read from the same PubChem-sourced file
+// scripts/novelty.py uses. The structures are NOT written out here on purpose: an
+// earlier revision of this test hand-typed them, and all three were plausible-looking
+// molecules that were not the drugs they claimed to be — wrong InChIKey skeleton,
+// wrong mass by 30–110 Da. A test that guards the pre-filter with invented compounds
+// guards nothing. Re-fetch by CID; never retype.
+type priorArtCompound struct {
+	Name   string  `json:"name"`
+	CID    int     `json:"cid"`
+	MW     float64 `json:"mw"`
+	SMILES string  `json:"smiles"`
+}
+
+func priorArt(t *testing.T) []priorArtCompound {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("data", "prior_art_kras_g12c.json"))
+	if err != nil {
+		t.Fatalf("read prior art: %v", err)
+	}
+	var doc struct {
+		Compounds []priorArtCompound `json:"compounds"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("parse prior art: %v", err)
+	}
+	if len(doc.Compounds) == 0 {
+		t.Fatal("prior art file declares no compounds")
+	}
+	return doc.Compounds
+}
+
 // A pre-filter that discards the approved drug cannot be used to judge a molecule
-// designed to resemble it. Every clinical KRAS switch-II inhibitor breaks the default
-// rule-of-five gate: sotorasib is 533 Da, ARS-1620 540 Da, adagrasib 574 Da with two
-// rule-of-five violations and a QED of 0.27. The curated site's weight window has to
-// reach the pre-filter, or the generation prompt asks for 430–620 Da while everything
-// above 500 Da is silently dropped.
+// designed to resemble it. The two marketed KRAS switch-II inhibitors both break the
+// default 500 Da rule-of-five ceiling — sotorasib is 560.6 Da, adagrasib 604.1 — so
+// the curated site's weight window has to reach the pre-filter, or the generation
+// prompt asks for 430–620 Da while everything above 500 Da is silently dropped.
+//
+// The tool compounds ARS-1620 (430.8) and ARS-853 (433.0) sit under the default
+// ceiling and survive it. Saying otherwise takes a molecule that is not ARS-1620.
 func TestCuratedThresholdsAdmitTheRealG12CInhibitors(t *testing.T) {
 	skipUnlessValidator(t)
 
-	drugs := map[string]string{
-		"sotorasib": "CC1=CC=CC(F)=C1C1=C(C(=O)N2C(C)COCC2C)C2=NC(N3CCN(C(=O)C=C)C[C@@H]3C)=NC=C2N=C1",
-		"adagrasib": "CN1CCC[C@@H]1COC1=NC(N2CCN(C(=O)C=C)C[C@@H]2C)=C2C=CC(Cl)=C(C3=CC=CC4=C3C=CC=C4F)C2=N1",
-		"ARS-1620":  "CC1CN(C(=O)C=C)CCN1C1=NC(=NC2=C1C=CC(=C2Cl)C1=C(F)C=CC=C1O)OC[C@@H]1CCCN1C",
-	}
-	names := make([]string, 0, len(drugs))
-	batch := make([]string, 0, len(drugs))
-	for n, s := range drugs {
-		names = append(names, n)
-		batch = append(batch, s)
+	// Divarasib is 622.1 Da — 2.1 Da above our own MaxMW. It is excluded here so the
+	// suite reflects what the window actually admits; TestDivarasibFallsOutsideTheWindow
+	// pins that gap so widening the window cannot pass unnoticed.
+	heavy := map[string]bool{"sotorasib": true, "adagrasib": true}
+	var names, batch []string
+	for _, c := range priorArt(t) {
+		if c.Name == "divarasib" {
+			continue
+		}
+		names = append(names, c.Name)
+		batch = append(batch, c.SMILES)
 	}
 
-	// Default thresholds: every one of them is discarded.
+	// Default thresholds: the two drugs above 500 Da are discarded.
 	base, err := ValidateSMILES(context.Background(), "run_defaults", batch, nil, nil)
 	if err != nil {
 		t.Fatalf("ValidateSMILES(defaults): %v", err)
 	}
 	for i, v := range base {
-		if v.Kept {
+		if heavy[names[i]] && v.Kept {
 			t.Errorf("%s survived the default pre-filter; the 500 Da ceiling was expected to drop it", names[i])
+		}
+		if !heavy[names[i]] && !v.Kept && v.DropReason == "mw_out_of_range" {
+			t.Errorf("%s dropped for weight by the default pre-filter; it is under 500 Da", names[i])
 		}
 	}
 
-	// The curated KRAS G12C window admits all three.
+	// The curated KRAS G12C window admits them.
 	site := LookupKnownSite("P01116", models.Mutation{WildType: "G", Position: 12, Mutant: "C"}, "")
 	th := siteThresholds(site)
 	if th == nil {
@@ -161,6 +201,40 @@ func TestCuratedThresholdsAdmitTheRealG12CInhibitors(t *testing.T) {
 			t.Errorf("%s dropped by the curated pre-filter (reason %q); it is an approved or clinical G12C inhibitor",
 				names[i], v.DropReason)
 		}
+	}
+}
+
+// The design window tops out at 620 Da and divarasib weighs 622.1, so the newest
+// clinical G12C inhibitor is one the generator is forbidden to propose. That may be
+// the right trade — every extra dalton widens the search — but it must be a decision
+// rather than an accident, so it is pinned. If the window moves, this test fails and
+// whoever moved it has to say so out loud.
+func TestDivarasibFallsOutsideTheWindow(t *testing.T) {
+	skipUnlessValidator(t)
+
+	var divarasib priorArtCompound
+	for _, c := range priorArt(t) {
+		if c.Name == "divarasib" {
+			divarasib = c
+		}
+	}
+	if divarasib.SMILES == "" {
+		t.Fatal("divarasib missing from the prior art file")
+	}
+
+	site := LookupKnownSite("P01116", models.Mutation{WildType: "G", Position: 12, Mutant: "C"}, "")
+	th := siteThresholds(site)
+	if th == nil {
+		t.Fatal("the curated switch-II site declares no weight window")
+	}
+	got, err := ValidateSMILES(context.Background(), "run_divarasib", []string{divarasib.SMILES}, nil, th)
+	if err != nil {
+		t.Fatalf("ValidateSMILES: %v", err)
+	}
+	if got[0].Kept || got[0].DropReason != "mw_out_of_range" {
+		t.Errorf("divarasib (%.1f Da) kept=%v drop=%q; the window is %.0f–%.0f Da. "+
+			"If the window was widened on purpose, update this test and TestCuratedThresholdsAdmitTheRealG12CInhibitors.",
+			divarasib.MW, got[0].Kept, got[0].DropReason, th.MWMin, th.MWMax)
 	}
 }
 
