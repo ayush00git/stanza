@@ -1,6 +1,11 @@
 import { useState } from 'react'
-import { dropReasonLabel, type Candidate, type ValidationSummary } from '../../lib/api'
-import Thinking, { GEN_PHASES } from '../Thinking'
+import {
+  dropReasonLabel,
+  type Candidate,
+  type GenerateProgress,
+  type MoleculeCheck,
+  type ValidationSummary,
+} from '../../lib/api'
 
 /** Per-candidate docking phase, keyed by SMILES in the page's dockState map. */
 export type CandidatePhase = 'docking' | 'done' | 'error'
@@ -16,6 +21,9 @@ type Props = {
   generateError?: string | null
   /** The pre-filter's verdict on the most recent round; null before any round runs. */
   validation?: ValidationSummary | null
+  /** The live generation round: current step, and each molecule's verdict as it lands. */
+  genProgress?: GenerateProgress | null
+  genChecks?: MoleculeCheck[]
   onGenerate: (n: number) => void
   /** Docking state keyed by candidate SMILES. */
   dockState: Record<string, CandidateDockState>
@@ -40,6 +48,69 @@ function Metric({ label, value }: { label: string; value: string }) {
       <span className="tabular-nums text-ink">{value}</span>
       <span>{label}</span>
     </span>
+  )
+}
+
+/**
+ * The generation round, live.
+ *
+ * Claude takes a minute or two to design against the pocket, and the pre-filter then
+ * discards some of what it returns. Both used to happen behind a spinner, so a request for
+ * 8 molecules resolving to 2 looked like a failure. Here the stages narrate themselves and
+ * each SMILES is shown the moment its verdict lands — kept, or dropped with the reason.
+ */
+function GenerationStream({
+  progress,
+  checks,
+}: {
+  progress: GenerateProgress | null
+  checks: MoleculeCheck[]
+}) {
+  const pct =
+    progress && progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : null
+  const kept = checks.filter((c) => c.kept).length
+
+  return (
+    <div className="mt-3 rounded-md border border-hairline bg-paper-deep/40 px-3 py-2.5" aria-live="polite">
+      <div className="flex flex-wrap items-baseline gap-2">
+        <span className="inline-flex items-center gap-1.5 text-xs font-medium text-accent">
+          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
+          {progress?.stage === 'claude' ? 'Claude is designing' : 'Generating'}
+        </span>
+        <span className="text-xs text-muted">
+          {progress?.message ?? 'starting'}
+          {progress && progress.total > 0 && ` · step ${progress.done} of ${progress.total}`}
+        </span>
+      </div>
+
+      <div className="mt-2 h-0.5 overflow-hidden rounded-full bg-hairline">
+        <div
+          className="h-full rounded-full bg-accent transition-[width] duration-500"
+          style={{ width: `${pct ?? 4}%` }}
+        />
+      </div>
+
+      {checks.length > 0 && (
+        <>
+          <p className="mt-2.5 text-xs text-muted">
+            <span className="tabular-nums text-ink">{kept}</span> kept of{' '}
+            <span className="tabular-nums text-ink">{checks.length}</span> checked
+          </p>
+          <ul className="mt-1.5 space-y-1.5 border-t border-hairline pt-2">
+            {checks.map((c, i) => (
+              <li key={`${c.smiles}-${i}`} className="flex flex-col gap-0.5">
+                <span className="break-all font-mono text-[11px] leading-snug text-muted">{c.smiles}</span>
+                <span className={`text-xs ${c.kept ? 'text-accent' : 'text-ink'}`}>
+                  {c.kept
+                    ? `kept · ${c.candidate?.mol_weight.toFixed(0) ?? '?'} Da`
+                    : `dropped — ${c.reason ?? 'unknown'}`}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </div>
   )
 }
 
@@ -121,6 +192,8 @@ export default function CandidatePanel({
   generating,
   generateError,
   validation,
+  genProgress,
+  genChecks = [],
   onGenerate,
   dockState,
   onDock,
@@ -164,17 +237,13 @@ export default function CandidatePanel({
 
       {!generating && validation && <ValidationNote v={validation} />}
 
-      {/* Regenerating over an existing list: the list stays put, so the waiting
-          indicator has to live up here or it would not be seen at all. */}
-      {generating && candidates.length > 0 && (
-        <Thinking phases={GEN_PHASES} intervalMs={3200} className="mt-3" />
-      )}
+      {/* Regenerating over an existing list: the list stays put, so the live round has to
+          be narrated up here or it would not be seen at all. */}
+      {generating && <GenerationStream progress={genProgress ?? null} checks={genChecks} />}
 
       {candidates.length === 0 ? (
         <div className="mt-4 rounded-lg border border-dashed border-hairline bg-paper-deep/40 px-6 py-12 text-center">
-          {generating ? (
-            <Thinking phases={GEN_PHASES} intervalMs={3200} className="justify-center" />
-          ) : (
+          {!generating && (
             <p className="text-sm text-muted">
               {canGenerate
                 ? 'Generate molecules to design against the mutant pocket'

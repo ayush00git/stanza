@@ -309,11 +309,39 @@ func covalentFeasibility(d models.LigandDock) float64 {
 // run.Candidates and returned. mu guards every read/write of the run's mutable
 // fields so it is safe under concurrent handlers.
 func GenerateCandidates(ctx context.Context, run *models.Run, n int, mu *sync.Mutex) ([]models.Candidate, *models.ValidationSummary, error) {
+	return GenerateCandidatesProgress(ctx, run, n, mu, nil)
+}
+
+// GenerateProgressFunc receives each completed generation step. Called from this
+// goroutine only, so it need not be concurrency-safe.
+type GenerateProgressFunc func(models.GenerateProgress)
+
+// GenerateCandidatesProgress is GenerateCandidates with a step callback. The Claude call
+// is a single ~2-minute request, so the stream cannot show it thinking; what it can show
+// is the pocket analysis, the moment the SMILES arrive, and then each molecule's verdict
+// as the pre-filter reaches it. onProgress may be nil.
+func GenerateCandidatesProgress(ctx context.Context, run *models.Run, n int, mu *sync.Mutex, onProgress GenerateProgressFunc) ([]models.Candidate, *models.ValidationSummary, error) {
 	if n <= 0 {
 		n = 4
 	}
 	if n > maxGenPerCall {
 		n = maxGenPerCall
+	}
+
+	// total: pocket analysis, prompt, the Claude call, then one step per proposed molecule
+	// plus the summary. The molecule count is unknown until Claude answers, so Total stays
+	// 0 until then rather than lying about the denominator.
+	done := 0
+	step := func(stage, msg string, mutate func(*models.GenerateProgress)) {
+		if onProgress == nil {
+			return
+		}
+		done++
+		p := models.GenerateProgress{Stage: stage, Message: msg, Done: done, Total: 3 + n + 1}
+		if mutate != nil {
+			mutate(&p)
+		}
+		onProgress(p)
 	}
 
 	if run.Mutagenesis == nil {
@@ -326,6 +354,7 @@ func GenerateCandidates(ctx context.Context, run *models.Run, n int, mu *sync.Mu
 	ready := run.Pockets != nil && run.Pockets.Context != nil
 	mu.Unlock()
 	if !ready {
+		step("pockets", "detecting the mutant pocket with fpocket", nil)
 		pa, err := BuildPocketAnalysis(ctx, run)
 		if err != nil {
 			return nil, nil, fmt.Errorf("generation: pocket analysis: %w", err)
@@ -333,6 +362,8 @@ func GenerateCandidates(ctx context.Context, run *models.Run, n int, mu *sync.Mu
 		mu.Lock()
 		run.Pockets = pa
 		mu.Unlock()
+	} else {
+		step("pockets", "resistance pocket already mapped", nil)
 	}
 
 	// Snapshot the pocket context, the scored history, and the identities already
@@ -360,9 +391,23 @@ func GenerateCandidates(ctx context.Context, run *models.Run, n int, mu *sync.Mu
 	}
 	site := LookupKnownSite(run.UniprotID, run.Mutation, run.SiteHint)
 
+	brief := "designing against the mutant pocket"
+	if covalentResidue != "" {
+		brief = fmt.Sprintf("designing a warhead that can reach %s", covalentResidue)
+	}
+	step("prompt", brief, nil)
+	step("claude", fmt.Sprintf("Claude is proposing %d molecules (this takes a minute or two)", n), nil)
+
 	proposed, err := ProposeMolecules(ctx, pctx, run.Mutation, site, covalentResidue, history, n)
 	if err != nil {
 		return nil, nil, err
+	}
+	if onProgress != nil {
+		done++
+		onProgress(models.GenerateProgress{
+			Stage: "proposed", Message: fmt.Sprintf("%d molecules proposed, validating", len(proposed)),
+			Done: done, Total: 3 + len(proposed) + 1, Proposed: proposed,
+		})
 	}
 
 	// Stage 5: RDKit pre-filter — parse, canonicalize, dedupe, and drug-likeness
@@ -379,6 +424,30 @@ func GenerateCandidates(ctx context.Context, run *models.Run, n int, mu *sync.Mu
 	}
 
 	fresh, summary := summarizeValidation(verdicts, th)
+
+	// One event per molecule, in proposal order. This is the part worth streaming: the
+	// user watches each SMILES Claude wrote either become a candidate or get named and
+	// dropped, instead of a two-minute spinner ending in a shorter list than they asked for.
+	if onProgress != nil {
+		for _, v := range verdicts {
+			done++
+			check := &models.MoleculeCheck{
+				SMILES: v.SMILES, Kept: v.Kept, Reason: v.DropReason,
+				MolWeight: v.MolWeight, QED: v.QED,
+			}
+			if v.Kept {
+				c := verdictToCandidate(v)
+				check.Candidate = &c
+			}
+			msg := fmt.Sprintf("dropped: %s", v.DropReason)
+			if v.Kept {
+				msg = "kept"
+			}
+			onProgress(models.GenerateProgress{
+				Stage: "checked", Message: msg, Done: done, Total: 3 + len(verdicts) + 1, Check: check,
+			})
+		}
+	}
 	log.Printf("[gen:%s] validation: %d proposed, %d kept, dropped %v", shortID(run.ID), summary.Proposed, summary.Kept, summary.Dropped)
 
 	mu.Lock()

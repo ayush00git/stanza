@@ -89,6 +89,7 @@ func main() {
 	r.GET("/runs/:id/ranking", handlers.GetRunRankingHandler)
 	// Stage-6 Claude molecule generation (propose + RDKit filter) for a run.
 	r.POST("/runs/:id/generate", handlers.GenerateRunHandler)
+	r.GET("/runs/:id/generate/stream", handlers.GenerateRunStreamHandler)
 
 	// Researcher profiles (Stage 8): create, list, and fetch the identities that
 	// own run history. These require Postgres; without it they degrade gracefully.

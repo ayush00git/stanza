@@ -471,6 +471,96 @@ func GenerateRunHandler(c *gin.Context) {
 	})
 }
 
+// GenerateRunStreamHandler handles GET /runs/:id/generate/stream?n=6 (SSE).
+//
+// The Claude call takes a minute or two, and the pre-filter then silently discards some of
+// what it returns. Both facts were invisible: the POST variant blocks, then answers with a
+// shorter list than was asked for. This streams the pocket analysis, the moment the SMILES
+// arrive, and each molecule's verdict as the filter reaches it.
+//
+// Events: `progress` (models.GenerateProgress) → `result` (candidates + validation) → `done`,
+// or a single `error`.
+func GenerateRunStreamHandler(c *gin.Context) {
+	id := c.Param("id")
+	run, ok := DefaultRunStore.Get(id)
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "run not found"})
+		return
+	}
+	if run.Mutagenesis == nil {
+		c.JSON(http.StatusConflict, gin.H{"error": "run has no mutant structure yet"})
+		return
+	}
+	n, _ := strconv.Atoi(c.Query("n"))
+
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("X-Accel-Buffering", "no")
+
+	flusher, ok := c.Writer.(http.Flusher)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "streaming unsupported"})
+		return
+	}
+	w := c.Writer
+	ctx := c.Request.Context()
+
+	type event struct {
+		name string
+		data any
+	}
+	events := make(chan event, 16)
+	send := func(name string, data any) {
+		b, err := json.Marshal(data)
+		if err != nil {
+			return
+		}
+		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", name, b)
+		flusher.Flush()
+	}
+	emit := func(name string, data any) {
+		select {
+		case events <- event{name, data}:
+		case <-ctx.Done():
+		}
+	}
+
+	go func() {
+		defer close(events)
+		// The generation outlives the request, for the same reason the dock does: the Claude
+		// call is already paid for the moment it is issued, and a closed tab must not throw
+		// the molecules away. The candidates are stored on the run either way.
+		genCtx := context.WithoutCancel(ctx)
+		candidates, validation, err := services.GenerateCandidatesProgress(genCtx, run, n, &genMu,
+			func(p models.GenerateProgress) { emit("progress", p) })
+		if err != nil {
+			emit("error", gin.H{"error": err.Error()})
+			return
+		}
+		DefaultRunStore.Put(run)
+		persistRun(genCtx, run)
+		if candidates == nil {
+			candidates = []models.Candidate{}
+		}
+		emit("result", gin.H{"candidates": candidates, "validation": validation})
+	}()
+
+	for {
+		select {
+		case ev, open := <-events:
+			if !open {
+				send("done", gin.H{})
+				return
+			}
+			send(ev.name, ev.data)
+		case <-ctx.Done():
+			// The client hung up. Generation continues; its candidates land on the run.
+			return
+		}
+	}
+}
+
 // GetRunHandler handles GET /runs/:id.
 func GetRunHandler(c *gin.Context) {
 	id := c.Param("id")

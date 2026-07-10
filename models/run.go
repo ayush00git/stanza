@@ -209,6 +209,34 @@ type ValidationSummary struct {
 	Details []DroppedMolecule `json:"details,omitempty"`
 }
 
+// MoleculeCheck is one proposal's verdict, streamed as the pre-filter reaches it.
+// Kept molecules carry their scored Candidate; dropped ones carry the reason and the
+// property that disqualified them.
+type MoleculeCheck struct {
+	SMILES    string     `json:"smiles"` // canonical when valid, raw when not
+	Kept      bool       `json:"kept"`
+	Reason    string     `json:"reason,omitempty"` // "" when kept
+	MolWeight *float64   `json:"mol_weight,omitempty"`
+	QED       *float64   `json:"qed,omitempty"`
+	Candidate *Candidate `json:"candidate,omitempty"` // set iff Kept
+}
+
+// GenerateProgress is one step of a generation round, streamed while it runs. The Claude
+// call alone takes ~2 minutes; a spinner that says nothing for that long reads as a hang,
+// and the interesting part — which molecules survived the filter, and why — is invisible
+// until the end unless it is streamed.
+type GenerateProgress struct {
+	Stage   string `json:"stage"`   // "pockets" | "prompt" | "claude" | "proposed" | "validate" | "checked"
+	Message string `json:"message"` // human-readable
+	Done    int    `json:"done"`
+	Total   int    `json:"total"` // 0 while the count is not yet known
+	// Proposed is the raw SMILES list, emitted once at the "proposed" stage — before any
+	// of them are known to be valid. Nothing else in the pipeline sees these.
+	Proposed []string `json:"proposed,omitempty"`
+	// Check is one molecule's verdict, emitted at the "checked" stage, one per molecule.
+	Check *MoleculeCheck `json:"check,omitempty"`
+}
+
 // Run is a resistance-design run. Stage 1 populates WTStructure.
 type Run struct {
 	ID          string             `json:"id"`

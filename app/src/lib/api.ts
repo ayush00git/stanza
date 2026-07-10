@@ -773,10 +773,99 @@ export function dropReasonLabel(d: DroppedMolecule, v?: ValidationSummary | null
   }
 }
 
+/** One proposal's verdict, streamed as the pre-filter reaches it. */
+export type MoleculeCheck = {
+  smiles: string
+  kept: boolean
+  reason?: DropReason
+  mol_weight?: number
+  qed?: number
+  candidate?: Candidate
+}
+
+export type GenerateProgress = {
+  stage: 'pockets' | 'prompt' | 'claude' | 'proposed' | 'validate' | 'checked' | string
+  message: string
+  done: number
+  total: number
+  /** The raw SMILES Claude returned, once, before any is known to be valid. */
+  proposed?: string[]
+  /** One molecule's verdict, at the 'checked' stage. */
+  check?: MoleculeCheck
+}
+
+export type GenerateStreamCallbacks = {
+  onProgress: (p: GenerateProgress) => void
+  onResult: (r: GenerationResult) => void
+  onError: (message: string) => void
+  onDone: () => void
+}
+
+/**
+ * Stream a generation round over SSE. Wraps GET /runs/:id/generate/stream.
+ *
+ * The Claude call takes a minute or two and the pre-filter then drops some of what it
+ * returns; both were invisible behind a spinner. Events arrive as the pocket is mapped,
+ * the SMILES land, and each molecule is kept or named and dropped.
+ *
+ * Returns a close() that detaches the stream. Generation continues server-side and its
+ * candidates are stored on the run either way — the Claude call is already paid for.
+ */
+export function streamGenerateCandidates(
+  id: string,
+  n: number,
+  cb: GenerateStreamCallbacks,
+): () => void {
+  const es = new EventSource(`/runs/${encodeURIComponent(id)}/generate/stream?n=${n}`)
+  let closed = false
+  const close = () => {
+    if (!closed) {
+      closed = true
+      es.close()
+    }
+  }
+  const parse = <T,>(event: Event): T | null => {
+    try {
+      return JSON.parse((event as MessageEvent).data) as T
+    } catch {
+      return null
+    }
+  }
+
+  es.addEventListener('progress', (e) => {
+    const p = parse<GenerateProgress>(e)
+    if (p) cb.onProgress(p)
+  })
+  es.addEventListener('result', (e) => {
+    const r = parse<{ candidates: Candidate[] | null; validation: ValidationSummary | null }>(e)
+    if (r) cb.onResult({ candidates: r.candidates ?? [], validation: r.validation ?? null })
+  })
+  es.addEventListener('done', () => {
+    cb.onDone()
+    close()
+  })
+  // Fires for server `event: error` frames (which carry data) and for native connection
+  // failures (which do not). EventSource auto-reconnects on the latter, and a reconnect
+  // would issue a second Claude call, so close().
+  es.addEventListener('error', (e) => {
+    if (closed) return
+    const data = (e as MessageEvent).data
+    cb.onError(
+      data
+        ? (parse<{ error: string }>(e)?.error ?? 'Generation failed')
+        : 'Lost connection to the generation service.',
+    )
+    close()
+  })
+
+  return close
+}
+
 /**
  * Generate candidate molecules with Claude for a run's mutant pocket (Stage 6),
  * RDKit-filtered (Stage 5). Returns the kept candidates AND the pre-filter's verdict on
  * the ones it discarded. Slow — one Claude call (+ pocket analysis if not yet done).
+ * Blocking; prefer streamGenerateCandidates for anything user-facing.
  * Wraps POST /runs/:id/generate.
  */
 export async function generateCandidates(

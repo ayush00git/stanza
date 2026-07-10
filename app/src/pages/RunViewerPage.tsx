@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
-  generateCandidates,
+  streamGenerateCandidates,
   getRun,
   getRunPockets,
   getRunRanking,
@@ -16,6 +16,8 @@ import {
   type Ranking,
   type Run,
   type RunPocketAnalysis,
+  type GenerateProgress,
+  type MoleculeCheck,
   type ValidationSummary,
 } from '../lib/api'
 import MolstarViewer, { type HighlightResidue } from '../components/viewer/MolstarViewer'
@@ -165,6 +167,11 @@ export default function RunViewerPage() {
   const [generating, setGenerating] = useState(false)
   const [generateError, setGenerateError] = useState<string | null>(null)
   const [validation, setValidation] = useState<ValidationSummary | null>(null)
+  // The live generation round: the step Claude/the filter is on, and each molecule's
+  // verdict as it lands. Cleared when a new round starts.
+  const [genProgress, setGenProgress] = useState<GenerateProgress | null>(null)
+  const [genChecks, setGenChecks] = useState<MoleculeCheck[]>([])
+  const genStreamRef = useRef<(() => void) | null>(null)
 
   const [docks, setDocks] = useState<LigandDock[]>([])
   const [dockState, setDockState] = useState<Record<string, CandidateDockState>>({})
@@ -254,27 +261,44 @@ export default function RunViewerPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
 
+  // Claude takes a minute or two to design a round, and the pre-filter then discards some
+  // of what it returns. Streaming both means the wait shows the pocket being mapped, the
+  // SMILES arriving, and each molecule being kept or dropped — rather than a spinner that
+  // ends in a shorter list than was asked for.
   const handleGenerate = (n: number) => {
+    genStreamRef.current?.()
     setGenerating(true)
     setGenerateError(null)
-    generateCandidates(id, n, ctrlRef.current?.signal)
-      .then(({ candidates: fresh, validation }) => {
+    setGenProgress(null)
+    setGenChecks([])
+    setValidation(null)
+
+    genStreamRef.current = streamGenerateCandidates(id, n, {
+      onProgress: (p) => {
+        setGenProgress(p)
+        if (p.check) setGenChecks((prev) => [...prev, p.check!])
+      },
+      onResult: ({ candidates: fresh, validation }) => {
         // Append newly proposed molecules, de-duped by SMILES.
         setCandidates((prev) => {
           const seen = new Set(prev.map((c) => c.smiles))
           return [...prev, ...fresh.filter((c) => !seen.has(c.smiles))]
         })
-        // The pre-filter's verdict on the LAST round only. Older rounds' drops are gone
-        // from view once a new round runs, which is the right scope: the question this
-        // answers is "where did the molecules I just asked for go?"
+        // The pre-filter's verdict on the LAST round only. Older rounds' drops leave the
+        // view once a new round runs, which is the right scope: the question this answers
+        // is "where did the molecules I just asked for go?"
         setValidation(validation)
+      },
+      onError: (message) => {
+        setGenerateError(message)
         setGenerating(false)
-      })
-      .catch((e: unknown) => {
-        if (ctrlRef.current?.signal.aborted) return
-        setGenerateError(e instanceof Error ? e.message : 'Generation failed')
+        setGenProgress(null)
+      },
+      onDone: () => {
         setGenerating(false)
-      })
+        setGenProgress(null)
+      },
+    })
   }
 
   // Docking streams its steps: six Vina runs plus a covalent geometry pass is tens of
@@ -484,6 +508,8 @@ export default function RunViewerPage() {
               generating={generating}
               generateError={generateError}
               validation={validation}
+              genProgress={genProgress}
+              genChecks={genChecks}
               onGenerate={handleGenerate}
               dockState={dockState}
               onDock={handleDock}
