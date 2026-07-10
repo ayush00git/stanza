@@ -680,16 +680,82 @@ export async function getRunPockets(
   return (await res.json()) as RunPocketAnalysis
 }
 
+/** Why the Stage-5 pre-filter discarded one proposal. */
+export type DropReason =
+  | 'invalid_smiles'
+  | 'duplicate'
+  | 'mw_out_of_range'
+  | 'ro5_fail'
+  | 'low_qed'
+  | 'hard_to_synthesize'
+
+export type DroppedMolecule = {
+  smiles: string
+  reason: DropReason
+  mol_weight?: number
+  qed?: number
+}
+
+/**
+ * What the pre-filter did to one generation round. Claude proposing 8 and the board
+ * showing 2 is not a failure, but a silent drop is one nobody audits — this makes the
+ * six missing molecules, and the gate that ate them, visible.
+ */
+export type ValidationSummary = {
+  proposed: number
+  kept: number
+  dropped?: Partial<Record<DropReason, number>>
+  mw_min?: number
+  mw_max?: number
+  qed_min?: number
+  details?: DroppedMolecule[]
+}
+
+export type GenerationResult = {
+  candidates: Candidate[]
+  validation: ValidationSummary | null
+}
+
+/** Human-readable reason, naming the threshold the molecule actually missed. */
+export function dropReasonLabel(d: DroppedMolecule, v?: ValidationSummary | null): string {
+  switch (d.reason) {
+    case 'mw_out_of_range': {
+      const lo = v?.mw_min
+      const hi = v?.mw_max
+      if (lo != null && hi != null && d.mol_weight != null) {
+        const side = d.mol_weight < lo ? 'too light' : 'too heavy'
+        return `${side} — ${d.mol_weight.toFixed(1)} Da, window ${lo}–${hi} Da`
+      }
+      return 'molecular weight outside the window'
+    }
+    case 'low_qed':
+      return v?.qed_min != null && d.qed != null
+        ? `drug-likeness ${d.qed.toFixed(2)}, floor ${v.qed_min}`
+        : 'drug-likeness below the floor'
+    case 'ro5_fail':
+      return 'too many rule-of-five violations'
+    case 'duplicate':
+      return 'already proposed for this run'
+    case 'invalid_smiles':
+      return 'not a parseable molecule'
+    case 'hard_to_synthesize':
+      return 'synthetic accessibility too poor'
+    default:
+      return d.reason
+  }
+}
+
 /**
  * Generate candidate molecules with Claude for a run's mutant pocket (Stage 6),
- * RDKit-filtered (Stage 5). Returns only the kept, scored candidates. Slow — one
- * Claude call (+ pocket analysis if not yet done). Wraps POST /runs/:id/generate.
+ * RDKit-filtered (Stage 5). Returns the kept candidates AND the pre-filter's verdict on
+ * the ones it discarded. Slow — one Claude call (+ pocket analysis if not yet done).
+ * Wraps POST /runs/:id/generate.
  */
 export async function generateCandidates(
   id: string,
   n?: number,
   signal?: AbortSignal,
-): Promise<Candidate[]> {
+): Promise<GenerationResult> {
   const res = await fetch(`/runs/${encodeURIComponent(id)}/generate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -697,8 +763,11 @@ export async function generateCandidates(
     signal,
   })
   if (!res.ok) throw new Error(await errorMessage(res, 'Generation failed'))
-  const body = (await res.json()) as { candidates: Candidate[] | null }
-  return body.candidates ?? []
+  const body = (await res.json()) as {
+    candidates: Candidate[] | null
+    validation: ValidationSummary | null
+  }
+  return { candidates: body.candidates ?? [], validation: body.validation ?? null }
 }
 
 /**

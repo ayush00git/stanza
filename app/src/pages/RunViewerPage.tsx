@@ -16,6 +16,7 @@ import {
   type Ranking,
   type Run,
   type RunPocketAnalysis,
+  type ValidationSummary,
 } from '../lib/api'
 import MolstarViewer, { type HighlightResidue } from '../components/viewer/MolstarViewer'
 import MutationDeltaPanel from '../components/runs/MutationDeltaPanel'
@@ -163,6 +164,7 @@ export default function RunViewerPage() {
   const [candidates, setCandidates] = useState<Candidate[]>([])
   const [generating, setGenerating] = useState(false)
   const [generateError, setGenerateError] = useState<string | null>(null)
+  const [validation, setValidation] = useState<ValidationSummary | null>(null)
 
   const [docks, setDocks] = useState<LigandDock[]>([])
   const [dockState, setDockState] = useState<Record<string, CandidateDockState>>({})
@@ -256,12 +258,16 @@ export default function RunViewerPage() {
     setGenerating(true)
     setGenerateError(null)
     generateCandidates(id, n, ctrlRef.current?.signal)
-      .then((fresh) => {
+      .then(({ candidates: fresh, validation }) => {
         // Append newly proposed molecules, de-duped by SMILES.
         setCandidates((prev) => {
           const seen = new Set(prev.map((c) => c.smiles))
           return [...prev, ...fresh.filter((c) => !seen.has(c.smiles))]
         })
+        // The pre-filter's verdict on the LAST round only. Older rounds' drops are gone
+        // from view once a new round runs, which is the right scope: the question this
+        // answers is "where did the molecules I just asked for go?"
+        setValidation(validation)
         setGenerating(false)
       })
       .catch((e: unknown) => {
@@ -477,6 +483,7 @@ export default function RunViewerPage() {
               candidates={candidates}
               generating={generating}
               generateError={generateError}
+              validation={validation}
               onGenerate={handleGenerate}
               dockState={dockState}
               onDock={handleDock}

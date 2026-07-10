@@ -67,12 +67,12 @@ type PocketAnalysis struct {
 // LigandDock is one molecule docked into both tracks of a run (Stage 4): the
 // resistance pocket of the WT structure and of the mutant structure.
 type LigandDock struct {
-	SMILES      string  `json:"smiles"`
-	WTScore     float64 `json:"wt_score"`     // Vina affinity (kcal/mol); more negative = stronger
-	MutantScore float64 `json:"mutant_score"` // raw mutant Vina affinity; never covalent-adjusted
-	Selectivity float64 `json:"selectivity"`  // wt_score - mutant_score; large positive spares WT
-	WTPosePDB   string  `json:"wt_pose_pdb,omitempty"`
-	MutantPosePDB string `json:"mutant_pose_pdb,omitempty"`
+	SMILES        string  `json:"smiles"`
+	WTScore       float64 `json:"wt_score"`     // Vina affinity (kcal/mol); more negative = stronger
+	MutantScore   float64 `json:"mutant_score"` // raw mutant Vina affinity; never covalent-adjusted
+	Selectivity   float64 `json:"selectivity"`  // wt_score - mutant_score; large positive spares WT
+	WTPosePDB     string  `json:"wt_pose_pdb,omitempty"`
+	MutantPosePDB string  `json:"mutant_pose_pdb,omitempty"`
 	// Covalent is set whenever a warhead-bearing molecule is docked against a mutated
 	// cysteine, whatever the outcome — see the Covalent* status constants. It never
 	// alters MutantScore: the covalent bond is not a Vina energy and folding a
@@ -168,6 +168,34 @@ type Candidate struct {
 	SAScore   *float64 `json:"sa_score,omitempty"`
 	MolWeight float64  `json:"mol_weight"`
 	LogP      float64  `json:"logp"`
+}
+
+// DroppedMolecule is one Stage-6 proposal the Stage-5 pre-filter discarded, kept with
+// the property that disqualified it. Counts alone say "6 dropped for weight"; a designer
+// needs to know whether they were 300 Da or 700 Da, because those imply opposite fixes.
+// SMILES is the canonical form when the molecule parsed, the raw string when it did not.
+type DroppedMolecule struct {
+	SMILES    string   `json:"smiles"`
+	Reason    string   `json:"reason"` // invalid_smiles | duplicate | mw_out_of_range | ro5_fail | low_qed | hard_to_synthesize
+	MolWeight *float64 `json:"mol_weight,omitempty"`
+	QED       *float64 `json:"qed,omitempty"`
+}
+
+// ValidationSummary records what the Stage-5 pre-filter did to one generation round.
+// It exists because the filter is the quietest part of the pipeline and the most likely
+// to be wrong: it silently deleted every clinical KRAS G12C inhibitor until the curated
+// site's weight window was wired through to it. A drop the user cannot see is a drop
+// nobody audits. Thresholds are echoed so the UI can name the window a molecule missed.
+type ValidationSummary struct {
+	Proposed int            `json:"proposed"`
+	Kept     int            `json:"kept"`
+	Dropped  map[string]int `json:"dropped,omitempty"` // reason → count
+	// The window actually applied to this round. Zero means "the script's default".
+	MWMin  float64 `json:"mw_min,omitempty"`
+	MWMax  float64 `json:"mw_max,omitempty"`
+	QEDMin float64 `json:"qed_min,omitempty"`
+	// Details carries one entry per dropped molecule, in proposal order.
+	Details []DroppedMolecule `json:"details,omitempty"`
 }
 
 // Run is a resistance-design run. Stage 1 populates WTStructure.

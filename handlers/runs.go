@@ -450,7 +450,7 @@ func GenerateRunHandler(c *gin.Context) {
 	// A body is optional; ignore decode errors and fall back to defaults.
 	_ = json.NewDecoder(c.Request.Body).Decode(&body)
 
-	candidates, err := services.GenerateCandidates(c.Request.Context(), run, body.N, &genMu)
+	candidates, validation, err := services.GenerateCandidates(c.Request.Context(), run, body.N, &genMu)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
@@ -461,9 +461,13 @@ func GenerateRunHandler(c *gin.Context) {
 	if candidates == nil {
 		candidates = []models.Candidate{}
 	}
+	// The pre-filter's verdict travels with the candidates. Claude proposing 8 molecules
+	// and the UI showing 2 is not a generation failure, and the user should not have to
+	// read the server log to learn which gate ate the other six.
 	c.JSON(http.StatusOK, gin.H{
 		"run_id":     id,
 		"candidates": candidates,
+		"validation": validation,
 	})
 }
 

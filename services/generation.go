@@ -67,7 +67,7 @@ func ProposeMolecules(ctx context.Context, pctx *models.MutantPocketContext, mut
 				"candidates": map[string]any{
 					"type":        "array",
 					"items":       map[string]any{"type": "string"},
-					"description":  "Novel, drug-like, valid SMILES strings, distinct from any already tried.",
+					"description": "Novel, drug-like, valid SMILES strings, distinct from any already tried.",
 				},
 			},
 			Required: []string{"candidates"},
@@ -105,6 +105,32 @@ func ProposeMolecules(ctx context.Context, pctx *models.MutantPocketContext, mut
 			resp.StopDetails.Category, resp.StopDetails.Explanation)
 	}
 	return nil, fmt.Errorf("claude proposed no molecules (stop reason %q)", resp.StopReason)
+}
+
+// summarizeValidation splits a round's verdicts into the candidates that survived and a
+// record of what the pre-filter discarded, in proposal order. The thresholds actually
+// applied are echoed into the summary so the UI can name the window a molecule missed —
+// "too light, 402.4 Da, window 430–620" is actionable; "6 dropped" is not.
+//
+// A nil `th` means the script's own defaults were used and no window is reported.
+func summarizeValidation(verdicts []MoleculeVerdict, th *ValidationThresholds) ([]models.Candidate, *models.ValidationSummary) {
+	var fresh []models.Candidate
+	summary := &models.ValidationSummary{Proposed: len(verdicts), Dropped: map[string]int{}}
+	if th != nil {
+		summary.MWMin, summary.MWMax, summary.QEDMin = th.MWMin, th.MWMax, th.QEDMin
+	}
+	for _, v := range verdicts {
+		if v.Kept {
+			fresh = append(fresh, verdictToCandidate(v))
+			continue
+		}
+		summary.Dropped[v.DropReason]++
+		summary.Details = append(summary.Details, models.DroppedMolecule{
+			SMILES: v.SMILES, Reason: v.DropReason, MolWeight: v.MolWeight, QED: v.QED,
+		})
+	}
+	summary.Kept = len(fresh)
+	return fresh, summary
 }
 
 // buildGenerationPrompt renders the pocket context, the mutation delta, and the
@@ -282,7 +308,7 @@ func covalentFeasibility(d models.LigandDock) float64 {
 // by InChIKey), and non-drug-like proposals; the kept ones are merged into
 // run.Candidates and returned. mu guards every read/write of the run's mutable
 // fields so it is safe under concurrent handlers.
-func GenerateCandidates(ctx context.Context, run *models.Run, n int, mu *sync.Mutex) ([]models.Candidate, error) {
+func GenerateCandidates(ctx context.Context, run *models.Run, n int, mu *sync.Mutex) ([]models.Candidate, *models.ValidationSummary, error) {
 	if n <= 0 {
 		n = 4
 	}
@@ -291,7 +317,7 @@ func GenerateCandidates(ctx context.Context, run *models.Run, n int, mu *sync.Mu
 	}
 
 	if run.Mutagenesis == nil {
-		return nil, fmt.Errorf("generation: run has no structures (run Stage-2 mutagenesis first)")
+		return nil, nil, fmt.Errorf("generation: run has no structures (run Stage-2 mutagenesis first)")
 	}
 
 	// Ensure Stage-3 pocket analysis has run — the proposal is conditioned on the
@@ -302,7 +328,7 @@ func GenerateCandidates(ctx context.Context, run *models.Run, n int, mu *sync.Mu
 	if !ready {
 		pa, err := BuildPocketAnalysis(ctx, run)
 		if err != nil {
-			return nil, fmt.Errorf("generation: pocket analysis: %w", err)
+			return nil, nil, fmt.Errorf("generation: pocket analysis: %w", err)
 		}
 		mu.Lock()
 		run.Pockets = pa
@@ -322,7 +348,7 @@ func GenerateCandidates(ctx context.Context, run *models.Run, n int, mu *sync.Mu
 	}
 	mu.Unlock()
 	if pctx == nil {
-		return nil, fmt.Errorf("generation: no resistance pocket to design against")
+		return nil, nil, fmt.Errorf("generation: no resistance pocket to design against")
 	}
 
 	// A mutation that installs a cysteine changes what the generator must optimise: the
@@ -336,7 +362,7 @@ func GenerateCandidates(ctx context.Context, run *models.Run, n int, mu *sync.Mu
 
 	proposed, err := ProposeMolecules(ctx, pctx, run.Mutation, site, covalentResidue, history, n)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Stage 5: RDKit pre-filter — parse, canonicalize, dedupe, and drug-likeness
@@ -346,27 +372,20 @@ func GenerateCandidates(ctx context.Context, run *models.Run, n int, mu *sync.Mu
 	// model is steered toward 430–620 Da and everything above 500 Da is silently dropped,
 	// which is what happened, and which would also have discarded sotorasib, adagrasib and
 	// ARS-1620 had they been proposed.
-	verdicts, err := ValidateSMILES(ctx, run.ID, proposed, seenKeys, siteThresholds(site))
+	th := siteThresholds(site)
+	verdicts, err := ValidateSMILES(ctx, run.ID, proposed, seenKeys, th)
 	if err != nil {
-		return nil, fmt.Errorf("generation: validation: %w", err)
+		return nil, nil, fmt.Errorf("generation: validation: %w", err)
 	}
 
-	var fresh []models.Candidate
-	dropped := make(map[string]int)
-	for _, v := range verdicts {
-		if v.Kept {
-			fresh = append(fresh, verdictToCandidate(v))
-		} else {
-			dropped[v.DropReason]++
-		}
-	}
-	log.Printf("[gen:%s] validation: %d proposed, %d kept, dropped %v", shortID(run.ID), len(verdicts), len(fresh), dropped)
+	fresh, summary := summarizeValidation(verdicts, th)
+	log.Printf("[gen:%s] validation: %d proposed, %d kept, dropped %v", shortID(run.ID), summary.Proposed, summary.Kept, summary.Dropped)
 
 	mu.Lock()
 	run.Candidates = append(run.Candidates, fresh...)
 	mu.Unlock()
 
-	return fresh, nil
+	return fresh, summary, nil
 }
 
 // verdictToCandidate projects a kept RDKit verdict onto the stored Candidate shape.

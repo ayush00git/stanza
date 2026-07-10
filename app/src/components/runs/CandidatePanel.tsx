@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { Candidate } from '../../lib/api'
+import { dropReasonLabel, type Candidate, type ValidationSummary } from '../../lib/api'
 import Thinking, { GEN_PHASES } from '../Thinking'
 
 /** Per-candidate docking phase, keyed by SMILES in the page's dockState map. */
@@ -14,6 +14,8 @@ type Props = {
   candidates: Candidate[]
   generating: boolean
   generateError?: string | null
+  /** The pre-filter's verdict on the most recent round; null before any round runs. */
+  validation?: ValidationSummary | null
   onGenerate: (n: number) => void
   /** Docking state keyed by candidate SMILES. */
   dockState: Record<string, CandidateDockState>
@@ -38,6 +40,49 @@ function Metric({ label, value }: { label: string; value: string }) {
       <span className="tabular-nums text-ink">{value}</span>
       <span>{label}</span>
     </span>
+  )
+}
+
+/**
+ * What the Stage-5 pre-filter did to the round that just ran. Claude proposing 8
+ * molecules and the board showing 2 looks like a generation failure; it usually is not.
+ * The filter is the quietest stage in the pipeline and the one most likely to be
+ * misconfigured — it silently deleted every clinical KRAS G12C inhibitor until the
+ * curated weight window was wired through. A drop nobody sees is a drop nobody audits.
+ */
+function ValidationNote({ v }: { v: ValidationSummary }) {
+  const dropped = v.proposed - v.kept
+  if (dropped <= 0) {
+    return (
+      <p className="mt-3 text-xs text-muted">
+        Claude proposed {v.proposed}; the pre-filter kept all of them.
+      </p>
+    )
+  }
+  return (
+    <details className="mt-3 rounded-md border border-hairline bg-paper-deep/40 px-3 py-2">
+      <summary className="cursor-pointer list-none text-xs text-muted marker:content-none">
+        <span className="text-ink tabular-nums">{v.proposed}</span> proposed ·{' '}
+        <span className="text-ink tabular-nums">{v.kept}</span> kept ·{' '}
+        <span className="text-ink tabular-nums">{dropped}</span> dropped by the pre-filter
+        <span className="ml-1.5 text-muted">— why?</span>
+      </summary>
+      <ul className="mt-2 space-y-1.5 border-t border-hairline pt-2">
+        {(v.details ?? []).map((d, i) => (
+          <li key={`${d.smiles}-${i}`} className="flex flex-col gap-0.5">
+            <span className="break-all font-mono text-[11px] leading-snug text-muted">{d.smiles}</span>
+            <span className="text-xs text-ink">{dropReasonLabel(d, v)}</span>
+          </li>
+        ))}
+      </ul>
+      {v.mw_min != null && v.mw_max != null && (
+        <p className="mt-2 border-t border-hairline pt-2 text-[11px] leading-relaxed text-muted">
+          The window ({v.mw_min}–{v.mw_max} Da) comes from this target's curated site, not
+          from the default rule-of-five ceiling — the generation prompt asks for molecules
+          in that range, so the filter has to admit them.
+        </p>
+      )}
+    </details>
   )
 }
 
@@ -75,6 +120,7 @@ export default function CandidatePanel({
   candidates,
   generating,
   generateError,
+  validation,
   onGenerate,
   dockState,
   onDock,
@@ -115,6 +161,8 @@ export default function CandidatePanel({
       </div>
 
       {generateError && <p className="mt-3 text-sm text-conf-verylow">{generateError}</p>}
+
+      {!generating && validation && <ValidationNote v={validation} />}
 
       {/* Regenerating over an existing list: the list stays put, so the waiting
           indicator has to live up here or it would not be seen at all. */}
