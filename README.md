@@ -5,7 +5,8 @@
 <h1 align="center">Stanza</h1>
 
 <p align="center">
-  A structure-based, resistance-aware small-molecule design pipeline for covalent targets.
+  A structure-based, resistance-aware pipeline that designs and screens small molecules
+  against covalent and steric resistance mutations.
 </p>
 
 ---
