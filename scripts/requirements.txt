@@ -6,6 +6,10 @@
 #   scripts/validate.py  (Stage 5) — RDKit SMILES validation + drug-likeness filter.
 #   scripts/covalent.py  (Stage 4) — covalent warhead detection + tether to the
 #                                     mutated cysteine (RDKit; shells out to obabel).
+#
+# Run by hand, not by the server:
+#   scripts/novelty.py   — scaffold / Tanimoto / InChIKey audit of generated
+#                          molecules against data/prior_art_kras_g12c.json.
 openmm
 pdbfixer
 rdkit

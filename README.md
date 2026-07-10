@@ -41,11 +41,18 @@ offers is a **Cys12 thiol** for the warhead to bond. AutoDock Vina scores
 
 Two consequences shape the whole design:
 
-**1. `selectivity = wt_score − mutant_score` is the honest non-covalent margin, and it
-reads ≈ 0 for a covalent target.** That is the correct answer, not a bug. Gly12→Cys12
-barely perturbs the reversible contact set, so `wt_score ≈ mutant_score` to within
-~0.1 kcal/mol by construction. Non-covalent docking cannot separate the tracks, and it
-should not.
+**1. `selectivity = wt_score − mutant_score` is the honest non-covalent margin, and for a
+covalent target it is uninformative.** That is the correct answer, not a bug. Gly12→Cys12
+barely perturbs the reversible contact set, so the two tracks usually agree to within
+~0.1 kcal/mol. Non-covalent docking cannot separate them on the mechanism that matters.
+
+It is *uninformative*, not *zero*. Across seven in-window molecules docked into 6OIM, the
+margin ran from **−0.83 to +0.30 kcal/mol** (median +0.08). Five sit inside ±0.3; the
+outlier is the bulkiest, most rigid ligand. The Cys12 side chain shrinks the pocket by
+~48 Å³ (fpocket, Δvolume), so a ligand that fills it can genuinely prefer wild-type on
+sterics alone. A large `|selectivity|` therefore reports **steric fit**, never covalent
+discrimination — reading it as the latter is the exact error the removed "covalent
+credit" institutionalised.
 
 **2. The covalent signal is a dimensionless feasibility ∈ [0,1], reported *beside* the
 affinity and never folded into it.** It is measured from the docked geometry
@@ -164,10 +171,17 @@ permits nucleophilic attack, from a pose the receptor actually binds."* That is 
 reproducible, unit-honest triage filter whose reach, angle, contributing mode and
 seed-to-seed spread are all auditable.
 
+It can also claim, now measured rather than assumed, that the steered generator **produces
+novel scaffolds inside the declared 430–620 Da window, and that most of them clear the
+geometry gate** — 7/7 novel, 5/7 feasible, 1 correctly rejected at 4.52 Å reach, 1
+correctly flagged seed-dependent (2.77 Å spread across seeds).
+
 **It cannot claim** a binding affinity, a selectivity (the reported `selectivity` is the
-raw non-covalent margin, ≈ 0, meaning only that Vina cannot separate the tracks), a rank
-order among covalent binders (that is kinetic and feasibility is blind to it), or that one
-molecule is a better G12C inhibitor than another.
+raw non-covalent margin; when it is large it reports steric fit, not covalent
+discrimination), a rank order among covalent binders (that is kinetic and feasibility is
+blind to it), or that one molecule is a better G12C inhibitor than another. It cannot yet
+claim that a high-feasibility molecule forms a *buildable* covalent adduct — on the
+evidence so far, the correlation runs the wrong way.
 
 Stanza is a **warhead-reach filter, not a selectivity predictor.**
 
@@ -179,6 +193,19 @@ go test ./...           # Go unit tests (services, scoring, …)
 
 Tests do not launch Vina, fpocket or OpenBabel; the docking stages are exercised
 end-to-end only against a real toolchain.
+
+Reference structures are **read from `data/prior_art_kras_g12c.json`, never typed into a
+test.** An earlier revision hand-wrote SMILES for sotorasib, adagrasib and ARS-1620; all
+three were plausible-looking molecules that were not those drugs — wrong InChIKey skeleton,
+masses off by 28–109 Da. The pre-filter test built on them passed, because invented
+molecules of roughly the right size behave roughly the right way. The structures in the
+data file carry their PubChem CIDs; re-fetch them, do not retype them.
+
+Novelty is audited out-of-band, not in the pipeline:
+
+```bash
+echo '{"query":[{"id":"m1","smiles":"..."}]}' | python3 scripts/novelty.py
+```
 
 ## Limitations & roadmap
 
@@ -193,23 +220,51 @@ State these plainly; they are not buried.
   for an optimized drug). Rigid-receptor docking into a pocket a real drug pried open pays
   no reorganization penalty. A Vina score here is a *"fits the pocket"* signal, not a
   binding free energy.
-- **Generation still leans on prior art.** Asked for KRAS G12C binders without steering,
-  the model returned truncated ARS-1620 analogues below the viable weight range — one
-  sharing 86% of its heavy atoms with the published compound by maximum common
-  substructure. Site guidance now names the mechanism, the His95-groove substituent, the
-  430–620 Da window and the prior art to avoid, and the pre-filter no longer deletes the
-  molecules that guidance asks for. Whether that is *enough* to produce novel scaffolds is
-  **not yet demonstrated**.
+- **Novelty is now measured, and the novelty is real — but it lives in the ring system,
+  not the warhead.** `scripts/novelty.py` scores every molecule against the five published
+  switch-II inhibitors (`data/prior_art_kras_g12c.json`, structures fetched from PubChem by
+  CID). Across the 41 KRAS molecules generated so far: **41/41 novel scaffold**, zero exact
+  or generic Bemis–Murcko collisions, 32 distinct frameworks, max ECFP4 Tanimoto **0.485**
+  against any reference (median 0.278) — nothing near the 0.70 analogue line.
+
+  That headline overstates it, because a Murcko scaffold strips side chains and therefore
+  strips the warhead. Measured directly, **80%** carry an N-acyl saturated N-heterocycle
+  (5/5 references do) and **50%** carry an acyl-piperazine on an arene (4/5 do). The model
+  conserves the warhead-delivery module and innovates on the ring system it hangs from —
+  which is what the prompt asks for and what a medicinal chemist would do. The defensible
+  claim is *"novel scaffolds bearing conventional warhead chemistry,"* not *"novel
+  molecules."* Novelty is also **orthogonal to feasibility**: aspirin scores
+  `novel_scaffold` at Tanimoto 0.097 and cannot reach Cys12.
+
+- **The tether check contradicts the feasibility score, and the score ignores it.** After
+  measuring geometry, `covalent.py` tries to *build* the covalent adduct: bond S to the
+  warhead carbon, MMFF-minimise with the cysteine backbone fixed, then verify the S–C bond
+  closed to 1.81 ± 0.25 Å and that no ligand heavy atom sits within 2.0 Å of the receptor.
+  Of the seven in-window molecules docked, five clear the geometry gate — and **only one
+  produces a buildable adduct.** The other four clash (1.32–1.82 Å). The molecule scoring a
+  perfect `feasibility = 1.00` clashes *worst*; the one that tethers cleanly (S–C 1.89 Å)
+  scores **0.10**. A reach of 3.31 Å is too *close*: closing to a 1.81 Å bond drags the
+  ligand into the pocket wall, while a 3.94 Å pose has room to rotate in.
+
+  `feasibility = distance_score × angle_score` never sees the tether outcome, which is
+  recorded only as a `note`. So the 0.40-weight fitness term is ranked on a proxy that the
+  stronger structural check disagrees with on 4 of 5 molecules. Two caveats before treating
+  the tether as ground truth: the minimisation runs **in vacuum** (the receptor is not in
+  the force field, so the ligand relaxes into a wall it never feels), and the receptor is
+  **rigid** (real side chains flex). The disagreement is a live, unresolved defect, not a
+  settled verdict — it is surfaced rather than folded in.
 - **`uncertain` is a backstop, not a solution.** A ligand whose covalent call still flips
   with the seed at exhaustiveness 16 is reported as indistinguishable and excluded from
   the ranking. That is honest, but it means the tool declines to answer rather than
   answering correctly.
 
-Roadmap, in priority order: confirm that generation now yields novel scaffolds in the
-declared weight window; then genuine covalent docking (gnina's covalent mode or an
-AutoDock4 flexible-residue protocol) with a reorganization penalty. Note that even
-purpose-built covalent docking reaches only Spearman ρ ≈ 0.54 against experimental
-potency — a better docker raises the ceiling, it does not make the number an energy.
+Roadmap, in priority order: resolve the feasibility/tether contradiction — minimise the
+adduct with the receptor in the force field before trusting either signal, then decide
+whether the tether outcome belongs *inside* the feasibility score or beside it; then
+genuine covalent docking (gnina's covalent mode or an AutoDock4 flexible-residue protocol)
+with a reorganization penalty, which would subsume both. Note that even purpose-built
+covalent docking reaches only Spearman ρ ≈ 0.54 against experimental potency — a better
+docker raises the ceiling, it does not make the number an energy.
 
 ## References
 
