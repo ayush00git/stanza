@@ -103,15 +103,27 @@ function DockingRow({
   )
 }
 
+/** Round to `digits`, collapsing negative zero so a −0.0001 never prints as "−0.00". */
+function round(x: number, digits = 2): number {
+  const r = Number(x.toFixed(digits))
+  return r === 0 ? 0 : r
+}
+
+/** Fixed-decimal string with no negative zero: fitness is a z-score sum near 0. */
+function fixed(x: number, digits = 2): string {
+  return round(x, digits).toFixed(digits)
+}
+
 /** Signed value with a true minus glyph, e.g. "+4.10" / "−0.30". */
 function signed(x: number, digits = 2): string {
-  const s = x.toFixed(digits)
-  return x > 0 ? `+${s}` : s.replace('-', '−')
+  const r = round(x, digits)
+  const s = r.toFixed(digits)
+  return r > 0 ? `+${s}` : s.replace('-', '−')
 }
 
 /** Affinities are negative kcal/mol; render the minus as a glyph, not a hyphen. */
 function affinity(x: number): string {
-  return x.toFixed(2).replace('-', '−')
+  return fixed(x).replace('-', '−')
 }
 
 const SELECTIVITY_NOTE =
@@ -315,7 +327,7 @@ export default function SelectivityBoard({ ranking, status, error, activeSmiles,
                               className="text-xs text-muted"
                               title="Composite fitness: the pool-normalised weighted sum that produced this rank. Comparable only within this run."
                             >
-                              fitness {s.fitness.toFixed(2)}
+                              fitness {fixed(s.fitness)}
                             </span>
                           )}
                         </div>
