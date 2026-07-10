@@ -30,8 +30,6 @@ type Props = {
   onDock: (smiles: string) => void
   /** False while the run isn't ready to generate (e.g. no mutant structure). */
   canGenerate: boolean
-  /** How many molecules have been docked — these are what regeneration feeds back. */
-  dockedCount: number
   /** The reactive residue, e.g. "Cys12", for the feedback-round copy. */
   covalentResidue?: string | null
 }
@@ -114,6 +112,79 @@ function GenerationStream({
           </ul>
         </>
       )}
+    </div>
+  )
+}
+
+/** One node in the feedback-loop diagram. */
+function LoopStep({ n, label }: { n: number; label: string }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-full border border-accent/30 bg-paper px-2.5 py-1">
+      <span className="flex h-4 w-4 items-center justify-center rounded-full bg-accent text-[9px] font-semibold text-paper">
+        {n}
+      </span>
+      <span className="whitespace-nowrap text-ink">{label}</span>
+    </span>
+  )
+}
+
+/**
+ * The generate → dock → feed-back iteration, drawn.
+ *
+ * This is the pipeline's headline capability and the earlier one-liner buried it. The
+ * three steps run left to right; a dashed CSS bracket carries the docked results back
+ * under them to the start, arrowhead into Generate. Nothing here is automatic — the
+ * bracket is the DATA path, and the user acts on it by hitting Generate. The copy says so.
+ * Rendered unconditionally: it explains the mechanism, so it should not wait for the first
+ * dock to appear.
+ *
+ * It states the MECHANISM (what is fed back, and how it is ranked) and the INTENT (aiming
+ * for stronger molecules), never a proven outcome — whether the next batch actually scores
+ * higher is measured on the leaderboard. A claim of improvement the iteration may not
+ * deliver at this sample size would be the exact overclaim this project removes elsewhere.
+ */
+function FeedbackLoop({ covalentResidue }: { covalentResidue?: string | null }) {
+  const reachLabel = covalentResidue ? `Reach ${covalentResidue}` : 'Score selectivity'
+  const rankedBy = covalentResidue
+    ? `which warhead reached ${covalentResidue}`
+    : 'measured selectivity'
+
+  return (
+    <div className="mt-3 rounded-md border border-accent/40 bg-accent-soft px-3.5 py-3">
+      <div className="flex items-center gap-1.5 text-xs font-medium text-accent">
+        <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.6">
+          <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9" strokeLinecap="round" />
+          <path d="M12.4 1.8v2.9h-2.9" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+        Feedback round
+      </div>
+
+      {/* Forward path: three steps, left to right. */}
+      <div className="mt-2.5 flex flex-wrap items-center gap-x-1.5 gap-y-1.5 text-[11px]">
+        <LoopStep n={1} label="Generate" />
+        <span className="text-accent">→</span>
+        <LoopStep n={2} label="Dock" />
+        <span className="text-accent">→</span>
+        <LoopStep n={3} label={reachLabel} />
+      </div>
+
+      {/* Return path: a U-shaped bracket from step 3 (right) back under the row to step 1
+          (left), where an arrowhead points up into Generate. Built from CSS borders, not a
+          stretched SVG — it holds its shape and stroke weight at any panel width. Dashed to
+          read as "results carried back", not "runs automatically". */}
+      <div className="relative mx-2 mb-0.5 mt-2 h-6">
+        <div className="absolute inset-0 rounded-b-lg border-x border-b border-dashed border-accent/50" />
+        <span className="absolute -top-1 left-0 h-0 w-0 -translate-x-1/2 border-x-[4px] border-b-[6px] border-x-transparent border-b-accent" />
+        <span className="absolute left-1/2 top-1.5 -translate-x-1/2 whitespace-nowrap text-[10px] leading-none text-accent">
+          docked results carried back
+        </span>
+      </div>
+
+      <p className="mt-2 text-xs leading-relaxed text-ink">
+        <span className="font-medium">Every molecule you dock is fed back to Claude.</span>{' '}
+        Hit Generate and it re-designs against {rankedBy}, aiming for stronger molecules each
+        round. You drive every turn — nothing runs on its own.
+      </p>
     </div>
   )
 }
@@ -202,7 +273,6 @@ export default function CandidatePanel({
   dockState,
   onDock,
   canGenerate,
-  dockedCount,
   covalentResidue,
 }: Props) {
   const [n, setN] = useState(6)
@@ -245,20 +315,7 @@ export default function CandidatePanel({
           the headline capability, so it is highlighted rather than muted. It states the
           MECHANISM — what is fed back — not an outcome: whether the next batch scores
           higher is a measured question, and the leaderboard is where it is read. */}
-      {!generating && dockedCount > 0 && (
-        <div className="mt-3 flex items-start gap-2.5 rounded-md border border-accent/40 bg-accent-soft px-3.5 py-2.5">
-          <span className="mt-1.5 h-1.5 w-1.5 flex-none rounded-full bg-accent" />
-          <p className="text-xs leading-relaxed text-ink">
-            <span className="font-medium text-accent">Feedback round.</span> Every molecule
-            you've docked is fed back to Claude,{' '}
-            {covalentResidue
-              ? `ranked by which warhead best reached ${covalentResidue}`
-              : 'ranked by measured selectivity'}{' '}
-            — so the next batch is designed against measured results, not a blank pocket.
-            Regenerate to close the loop.
-          </p>
-        </div>
-      )}
+      {!generating && <FeedbackLoop covalentResidue={covalentResidue} />}
 
       {generateError && <p className="mt-3 text-sm text-conf-verylow">{generateError}</p>}
 

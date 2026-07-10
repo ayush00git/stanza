@@ -517,7 +517,6 @@ export default function RunViewerPage() {
               validation={validation}
               genProgress={genProgress}
               genChecks={genChecks}
-              dockedCount={docks.length}
               covalentResidue={covalentResidue}
               onGenerate={handleGenerate}
               dockState={dockState}
