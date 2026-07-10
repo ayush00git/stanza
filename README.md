@@ -42,6 +42,16 @@ sentence — reach, angle, contributing Vina mode, seed-to-seed spread — is in
 **What it cannot claim:** a binding affinity, a covalent selectivity, or a rank order among
 covalent binders (that is kinetic, and feasibility is blind to it).
 
+**Validated on a target where the answer is known.** The dual-track machinery was run
+against BCR-ABL **T315I** — a *steric* resistance mutation, the complementary case to KRAS's
+covalent one — with two real drugs and the pass criteria fixed before the docks finished.
+It redocked imatinib to its 1IEP crystal pose at **1.07 Å**, then scored imatinib at
+**−0.35** (defeated by T315I, correct sign) and ponatinib at **+0.45** (survives it) — a
+0.80 kcal/mol separation against 0.13 of seed noise. The magnitude is still wrong: experiment
+says imatinib loses ~4 kcal/mol, and a receptor frozen in DFG-out cannot see the
+conformational half of that mechanism. **Right answer, right reason, wrong size.** Full
+method, numbers and caveats: [`docs/features/11-abl-t315i-positive-control.md`](docs/features/11-abl-t315i-positive-control.md).
+
 **Three places this project proved its own headline numbers wrong** — the detail is in
 [Limitations](#limitations--roadmap), and it is the reason to trust the rest:
 
@@ -204,6 +214,14 @@ novel scaffolds inside the declared 430–620 Da window, and that most of them c
 geometry gate** — 7/7 novel, 5/7 feasible, 1 correctly rejected at 4.52 Å reach, 1
 correctly flagged seed-dependent (2.77 Å spread across seeds).
 
+And on a **steric** resistance mutation, where `selectivity` is a physically meaningful
+quantity rather than a structural zero, it can claim the machinery **picks the right drug**:
+imatinib −0.35 (defeated by ABL T315I), ponatinib +0.45 (survives it), separation 0.80
+kcal/mol against 0.13 of seed noise, after redocking imatinib to its crystal pose at 1.07 Å.
+The *sign and the ordering* are trustworthy. The *magnitude* is not — we recover 0.35 of an
+experimental ~4 kcal/mol, because a rigid DFG-out receptor cannot represent the
+conformational component of T315I resistance.
+
 **It cannot claim** a binding affinity, a selectivity (the reported `selectivity` is the
 raw non-covalent margin; when it is large it reports steric fit, not covalent
 discrimination), a rank order among covalent binders (that is kinetic and feasibility is
@@ -294,6 +312,14 @@ State these plainly; they are not buried.
   with the seed at exhaustiveness 16 is reported as indistinguishable and excluded from
   the ranking. That is honest, but it means the tool declines to answer rather than
   answering correctly.
+- **A rigid receptor recovers the sign of a resistance mutation, not its size.** The ABL
+  T315I control gets imatinib's direction right and separates it from ponatinib by 0.80
+  kcal/mol — but the experimental penalty is ~4 kcal/mol, so we recover under a tenth of it.
+  Resistance that works by shifting the protein's *conformation* (T315I destabilises the
+  DFG-out state imatinib needs) is invisible to a dock into one frozen frame. The pipeline
+  sees steric bumps. It does not see conformational selection, and no amount of
+  exhaustiveness fixes that. Flexible side chains (`--flexres`) would recover part of it;
+  an ensemble over conformers would recover more.
 
 Roadmap, in priority order: resolve the feasibility/tether contradiction — minimise the
 adduct with the receptor in the force field before trusting either signal, then decide
