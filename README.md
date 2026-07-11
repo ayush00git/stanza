@@ -66,6 +66,15 @@ blind to that. Right answer, right reason, wrong size: trust the sign and the or
 the number. The method, the caveats, and the metric that flattered the pose by 1.8x are in
 [`docs/features/11-abl-t315i-positive-control.md`](docs/features/11-abl-t315i-positive-control.md).
 
+The **covalent** gate has its own control. adagrasib, an approved covalent G12C inhibitor,
+docked freely into 6OIM scores feasibility **0.98** on the seed where Vina finds its bonding
+pose (reach 3.51 Å, angle 107°, textbook Bürgi–Dunitz), but only **1 seed in 3**, so the
+pipeline reports it seed-dependent and refuses to rank it. Both halves are right: the gate
+recognises a real drug's warhead, and the honesty backstop fires when the free dock is
+unreliable. It also means feasibility **0 is not evidence a molecule cannot bond**: the
+approved drug scores 0 on another seed. Method and caveats:
+[`docs/features/12-adagrasib-covalent-control.md`](docs/features/12-adagrasib-covalent-control.md).
+
 **Four places this project proved its own headline numbers wrong.** The detail is in
 [Limitations](#limitations--roadmap), and it is the reason to trust the rest.
 
@@ -306,6 +315,15 @@ reproduce bit-for-bit:
 
 ```bash
 scripts/controls/abl_t315i.sh            # ~8 min, needs vina + obabel + RDKit/PDBFixer
+```
+
+The covalent gate has a matching control: docking adagrasib, an approved G12C inhibitor,
+freely into 6OIM and checking whether the gate recognises its warhead (it does, on the seed
+Vina finds the bonding pose) and flags it seed-dependent (it does, since that pose appears
+only sometimes):
+
+```bash
+scripts/controls/adagrasib_covalent.sh   # ~10-15 min, adagrasib is floppy
 ```
 
 ## Limitations & roadmap
