@@ -160,6 +160,11 @@ Seven stages, run per resistance run:
 7. **Selectivity scoring and ranking** — a composite fitness over four normalised terms.
    `scoring/selectivity.go`.
 
+**The loop closes.** Every molecule you dock is fed back into the next generation round,
+ranked by which warhead actually reached the cysteine — so Claude designs the next batch
+against measured geometry rather than a blank pocket, and against the molecules it has
+already been shown not to repeat.
+
 ### The reference target is curated, not derived
 
 KRAS G12C is built on **PDB 6OIM** (sotorasib covalently bound to Cys12), *not* the
