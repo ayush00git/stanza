@@ -31,7 +31,7 @@ type Props = {
   onGenerate: (n: number) => void
   /** Docking state keyed by candidate SMILES. */
   dockState: Record<string, CandidateDockState>
-  onDock: (smiles: string) => void
+  onDock: (smiles: string, source?: 'claude' | 'chembl') => void
   /** False while the run isn't ready to generate (e.g. no mutant structure). */
   canGenerate: boolean
   /** The reactive residue, e.g. "Cys12", for the feedback-round copy. */
@@ -259,7 +259,7 @@ function ChemblReference({
 }: {
   fragments: Fragment[]
   dockState: Record<string, CandidateDockState>
-  onDock: (smiles: string) => void
+  onDock: (smiles: string, source?: 'claude' | 'chembl') => void
 }) {
   if (fragments.length === 0) return null
   return (
@@ -292,7 +292,7 @@ function ChemblReference({
                   ) : (
                     <button
                       type="button"
-                      onClick={() => onDock(f.smiles)}
+                      onClick={() => onDock(f.smiles, 'chembl')}
                       disabled={busy}
                       className="rounded-md border border-hairline px-3 py-1.5 text-xs text-ink transition-colors hover:border-ink disabled:opacity-50"
                     >

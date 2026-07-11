@@ -614,6 +614,8 @@ export type Scores = {
   qed?: number | null
   fitness?: number | null
   status: 'scored' | 'incomplete' | string
+  /** "claude" (generated) or "chembl" (fetched reference); display only, never affects rank. */
+  source?: string
   /** 0–1 geometric plausibility that the warhead can bond the thiol; mirrors CovalentDock.feasibility. Dimensionless, not an energy. */
   covalent_feasibility?: number | null
   /** Present for warhead-bearing molecules on a cysteine target — the covalent geometry verdict, not a score adjustment. */
@@ -946,8 +948,14 @@ export type DockStreamCallbacks = {
  *
  * EventSource can only issue GETs, so the SMILES travels as a query parameter.
  */
-export function streamDockLigand(id: string, smiles: string, cb: DockStreamCallbacks): () => void {
-  const url = `/runs/${encodeURIComponent(id)}/dock/stream?smiles=${encodeURIComponent(smiles)}`
+export function streamDockLigand(
+  id: string,
+  smiles: string,
+  cb: DockStreamCallbacks,
+  source?: 'claude' | 'chembl',
+): () => void {
+  const src = source ? `&source=${source}` : ''
+  const url = `/runs/${encodeURIComponent(id)}/dock/stream?smiles=${encodeURIComponent(smiles)}${src}`
   const es = new EventSource(url)
   let closed = false
   const close = () => {

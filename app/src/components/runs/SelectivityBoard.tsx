@@ -114,6 +114,28 @@ function fixed(x: number, digits = 2): string {
   return round(x, digits).toFixed(digits)
 }
 
+/**
+ * Where a ranked molecule came from. Claude's designs and fetched ChEMBL references share
+ * one leaderboard and one ruler; this badge keeps them visually distinct so a reference
+ * docked as a control is never mistaken for a generated candidate. Absent on docks recorded
+ * before the source was tracked, which render with no badge rather than a guessed one.
+ */
+function SourceBadge({ source }: { source?: string }) {
+  if (source === 'chembl') {
+    return (
+      <span className="rounded-full border border-hairline bg-paper-deep px-2 py-0.5 text-xs text-muted">
+        ChEMBL ref
+      </span>
+    )
+  }
+  if (source === 'claude') {
+    return (
+      <span className="rounded-full bg-accent-soft px-2 py-0.5 text-xs text-accent">Claude</span>
+    )
+  }
+  return null
+}
+
 /** Signed value with a true minus glyph, e.g. "+4.10" / "−0.30". */
 function signed(x: number, digits = 2): string {
   const r = round(x, digits)
@@ -321,6 +343,7 @@ export default function SelectivityBoard({ ranking, status, error, activeSmiles,
 
                       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
                         <div className="flex flex-wrap items-center gap-2">
+                          <SourceBadge source={s.source} />
                           {s.covalent && <CovalentBadge covalent={s.covalent} />}
                           {s.fitness != null && (
                             <span

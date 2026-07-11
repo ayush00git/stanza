@@ -129,8 +129,8 @@ ON CONFLICT (run_id, smiles_hash) DO NOTHING`
 	const insertDock = `
 INSERT INTO docks (id, run_id, smiles, smiles_hash, wt_score, mutant_score,
                    selectivity, wt_pose_pdb, mutant_pose_pdb, covalent,
-                   wt_spread, mutant_spread, replicates)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                   wt_spread, mutant_spread, replicates, source)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 ON CONFLICT (run_id, smiles_hash) DO NOTHING`
 	for _, d := range run.Docks {
 		var covalent any
@@ -142,7 +142,7 @@ ON CONFLICT (run_id, smiles_hash) DO NOTHING`
 		if _, err = tx.Exec(ctx, insertDock,
 			uuid.NewString(), run.ID, d.SMILES, smilesHash(d.SMILES), d.WTScore,
 			d.MutantScore, d.Selectivity, d.WTPosePDB, d.MutantPosePDB, covalent,
-			d.WTSpread, d.MutantSpread, d.Replicates,
+			d.WTSpread, d.MutantSpread, d.Replicates, d.Source,
 		); err != nil {
 			return err
 		}
@@ -229,7 +229,7 @@ FROM molecules WHERE run_id = $1 ORDER BY created_at`, runID)
 func (s *Store) loadDocks(ctx context.Context, runID string) ([]models.LigandDock, error) {
 	rows, err := s.Pool.Query(ctx, `
 SELECT smiles, wt_score, mutant_score, selectivity, wt_pose_pdb, mutant_pose_pdb, covalent,
-       wt_spread, mutant_spread, replicates
+       wt_spread, mutant_spread, replicates, source
 FROM docks WHERE run_id = $1 ORDER BY created_at`, runID)
 	if err != nil {
 		return nil, err
@@ -241,7 +241,7 @@ FROM docks WHERE run_id = $1 ORDER BY created_at`, runID)
 		var d models.LigandDock
 		var covalent []byte
 		if err := rows.Scan(&d.SMILES, &d.WTScore, &d.MutantScore, &d.Selectivity, &d.WTPosePDB, &d.MutantPosePDB, &covalent,
-			&d.WTSpread, &d.MutantSpread, &d.Replicates); err != nil {
+			&d.WTSpread, &d.MutantSpread, &d.Replicates, &d.Source); err != nil {
 			return nil, err
 		}
 		if len(covalent) > 0 {

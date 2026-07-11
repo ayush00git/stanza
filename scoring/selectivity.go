@@ -89,6 +89,8 @@ type Scores struct {
 	CovalentFeasibility *float64 `json:"covalent_feasibility,omitempty"`
 	Fitness             *float64 `json:"fitness"` // composite, pool-normalised; nil when status != "scored"
 	Status              string   `json:"status"`  // "scored" | "incomplete"
+	// Source is "claude" (generated) or "chembl" (fetched reference), for display only.
+	Source string `json:"source,omitempty"`
 	// Covalent is carried through from the dock so the leaderboard can flag
 	// mutant-selective covalent binders; nil for non-covalent molecules.
 	Covalent *models.CovalentDock `json:"covalent,omitempty"`
@@ -203,6 +205,7 @@ func ScoreAndRank(runID string, docks []models.LigandDock, qedBySMILES map[strin
 			WTSpread:            d.WTSpread,
 			MutantSpread:        d.MutantSpread,
 			Replicates:          d.Replicates,
+			Source:              d.Source,
 			QED:                 qptr,
 			CovalentFeasibility: cfptr,
 			Status:              "scored",

@@ -254,6 +254,8 @@ func DockRunStreamHandler(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "query parameter 'smiles' is required"})
 		return
 	}
+	// "claude" for a generated candidate, "chembl" for a fetched reference. Display only.
+	source := c.Query("source")
 	if run.Mutagenesis == nil {
 		c.JSON(http.StatusConflict, gin.H{"error": "run has no mutant structure yet"})
 		return
@@ -344,6 +346,7 @@ func DockRunStreamHandler(c *gin.Context) {
 			emit("error", gin.H{"error": err.Error()})
 			return
 		}
+		res.Source = source
 		genMu.Lock()
 		run.Docks = append(run.Docks, *res)
 		genMu.Unlock()

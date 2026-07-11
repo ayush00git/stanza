@@ -84,6 +84,11 @@ type LigandDock struct {
 	Replicates    int    `json:"replicates,omitempty"`
 	WTPosePDB     string `json:"wt_pose_pdb,omitempty"`
 	MutantPosePDB string `json:"mutant_pose_pdb,omitempty"`
+	// Source records where the molecule came from: "claude" for a generated candidate,
+	// "chembl" for a fetched reference compound. Empty on docks recorded before the field
+	// existed. It never affects scoring; it lets the leaderboard mark which entries are
+	// controls and which are designs.
+	Source string `json:"source,omitempty"`
 	// Covalent is set whenever a warhead-bearing molecule is docked against a mutated
 	// cysteine, whatever the outcome — see the Covalent* status constants. It never
 	// alters MutantScore: the covalent bond is not a Vina energy and folding a

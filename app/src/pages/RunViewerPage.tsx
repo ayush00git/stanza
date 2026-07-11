@@ -303,7 +303,7 @@ export default function RunViewerPage() {
 
   // Docking streams its steps: six Vina runs plus a covalent geometry pass is tens of
   // seconds of CPU, and a spinner that says nothing for a minute reads as a hang.
-  const handleDock = (smiles: string) => {
+  const handleDock = (smiles: string, source: 'claude' | 'chembl' = 'claude') => {
     dockStreamRef.current?.()
     setDockState((prev) => ({ ...prev, [smiles]: { phase: 'docking' } }))
     setDocking({ smiles, progress: null, partial: {} })
@@ -328,7 +328,7 @@ export default function RunViewerPage() {
         setDockState((prev) => ({ ...prev, [smiles]: { phase: 'error', error: message } }))
       },
       onDone: () => setDocking(null),
-    })
+    }, source)
   }
 
   // Highlight the resistance pocket's residues in BOTH viewers (WT and mutant
