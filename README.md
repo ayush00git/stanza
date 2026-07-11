@@ -165,6 +165,15 @@ ranked by which warhead actually reached the cysteine, so Claude designs the nex
 against measured geometry rather than a blank pocket, and against the molecules it has already
 been shown not to repeat.
 
+That history is not limited to Claude's own output. A **"Fetch from ChEMBL"** control pulls
+known compounds sized to the resistance pocket, and any you dock enter the same history. So
+you can hand the generator a *proven* binder to anchor on, not only its own attempts. This
+also serves as a control: docking a published inhibitor through the identical dual-track and
+covalent pipeline shows whether the geometry gate is calibrated, by putting a molecule with a
+known answer next to the novel scaffolds on one ruler. The reference molecules bypass the
+430-620 Da generation gate on purpose; that gate steers what Claude proposes, not what a human
+docks as a reference.
+
 ### The reference target is curated, not derived
 
 KRAS G12C is built on **PDB 6OIM** (sotorasib covalently bound to Cys12), *not* the AlphaFold

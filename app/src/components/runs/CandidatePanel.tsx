@@ -406,7 +406,7 @@ export default function CandidatePanel({
             disabled={generating || !canGenerate}
             className="rounded-md border border-ink bg-ink px-3.5 py-1.5 text-xs font-medium text-paper transition-colors hover:bg-transparent hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {generating ? 'Generating…' : 'Generate'}
+            {generating ? 'Generating…' : 'Generate From Claude'}
           </button>
         </div>
       </div>
