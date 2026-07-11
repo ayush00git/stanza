@@ -130,7 +130,9 @@ function SourceBadge({ source }: { source?: string }) {
   }
   if (source === 'claude') {
     return (
-      <span className="rounded-full bg-accent-soft px-2 py-0.5 text-xs text-accent">Claude</span>
+      <span className="rounded-full bg-claude/10 px-2 py-0.5 text-xs font-medium text-claude-deep">
+        Claude
+      </span>
     )
   }
   return null
@@ -315,6 +317,20 @@ export default function SelectivityBoard({ ranking, status, error, activeSmiles,
             {rows.map((m) => {
               const isActive = m.smiles === activeSmiles
               const s = m.scores
+              // Claude-designed rows carry a terracotta tint across the whole row (left
+              // border + background), so the generated molecules read apart from ChEMBL
+              // references at a glance. Non-Claude rows keep the blue active/hover styling.
+              const isClaude = s.source === 'claude'
+              const rowTone = isClaude
+                ? `border-l-2 border-l-claude pl-[14px] ${isActive ? 'bg-claude/15' : 'bg-claude/5 hover:bg-claude/10'}`
+                : isActive
+                  ? 'border-l-2 border-l-accent bg-accent-soft pl-[14px]'
+                  : 'hover:bg-paper-deep'
+              const rankTone = isClaude
+                ? 'bg-claude text-paper'
+                : isActive
+                  ? 'bg-accent text-paper'
+                  : 'bg-paper-deep text-muted'
               return (
                 <li key={m.smiles}>
                   <div
@@ -327,16 +343,12 @@ export default function SelectivityBoard({ ranking, status, error, activeSmiles,
                         onSelect(m.smiles)
                       }
                     }}
-                    className={`group flex cursor-pointer flex-col gap-3 border-b border-hairline px-4 py-3.5 transition-colors last:border-b-0 ${
-                      isActive ? 'border-l-2 border-l-accent bg-accent-soft pl-[14px]' : 'hover:bg-paper-deep'
-                    }`}
+                    className={`group flex cursor-pointer flex-col gap-3 border-b border-hairline px-4 py-3.5 transition-colors last:border-b-0 ${rowTone}`}
                   >
                     {/* Rank, covalent verdict, and the composite score that produced the rank. */}
                     <div className="flex items-start gap-3">
                       <span
-                        className={`mt-0.5 flex h-5 w-5 flex-none items-center justify-center rounded-full text-xs tabular-nums ${
-                          isActive ? 'bg-accent text-paper' : 'bg-paper-deep text-muted'
-                        }`}
+                        className={`mt-0.5 flex h-5 w-5 flex-none items-center justify-center rounded-full text-xs tabular-nums ${rankTone}`}
                       >
                         {m.rank}
                       </span>
