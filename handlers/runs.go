@@ -471,6 +471,41 @@ func GenerateRunHandler(c *gin.Context) {
 	})
 }
 
+// RunChemblHandler handles GET /runs/:id/chembl.
+//
+// Returns real, known ChEMBL molecules sized to the run's resistance pocket, so a user can
+// dock a published compound through the same dual-track + covalent pipeline as Claude's
+// proposals. These are a REFERENCE / control, not generated candidates: they bypass the
+// 430–620 Da generation gate (that gate steers Claude's output, not what a human hand-docks),
+// and docking a known drug alongside the novel scaffolds shows whether the geometry gate is
+// calibrated. `services.FetchFragments` queries ChEMBL by pocket size and ranks by fit.
+func RunChemblHandler(c *gin.Context) {
+	id := c.Param("id")
+	run, ok := DefaultRunStore.Get(id)
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "run not found"})
+		return
+	}
+	if run.Pockets == nil || run.Pockets.Context == nil {
+		c.JSON(http.StatusConflict, gin.H{"error": "run has no resistance pocket yet (run pocket analysis first)"})
+		return
+	}
+
+	mp := run.Pockets.Context.MutantPocket
+	pocket := models.Pocket{
+		PocketID:       mp.PocketID,
+		Center:         mp.Center,
+		Volume:         mp.Volume,
+		Hydrophobicity: mp.Hydrophobicity,
+		Polarity:       mp.Polarity,
+	}
+	frags := services.FetchFragments(pocket)
+	if frags == nil {
+		frags = []models.Fragment{}
+	}
+	c.JSON(http.StatusOK, gin.H{"run_id": id, "fragments": frags})
+}
+
 // GenerateRunStreamHandler handles GET /runs/:id/generate/stream?n=6 (SSE).
 //
 // The Claude call takes a minute or two, and the pre-filter then silently discards some of

@@ -231,6 +231,19 @@ export type Fragment = {
 }
 
 /**
+ * Known ChEMBL molecules sized to a run's resistance pocket, to dock as a reference
+ * alongside Claude's proposals. Wraps GET /runs/:id/chembl. These bypass the 430–620 Da
+ * generation gate by design — that gate steers what Claude proposes, not what a human
+ * chooses to dock as a control.
+ */
+export async function fetchRunChembl(id: string, signal?: AbortSignal): Promise<Fragment[]> {
+  const res = await fetch(`/runs/${encodeURIComponent(id)}/chembl`, { signal })
+  if (!res.ok) throw new Error(await errorMessage(res, 'ChEMBL fetch failed'))
+  const body = (await res.json()) as { fragments: Fragment[] | null }
+  return body.fragments ?? []
+}
+
+/**
  * Fetch candidate ChEMBL fragments for a pocket. The backend maps pocket
  * geometry/chemistry (volume, hydrophobicity, polarity) onto ChEMBL molecule
  * filters, so pass overrides straight from the binding-site table row. The

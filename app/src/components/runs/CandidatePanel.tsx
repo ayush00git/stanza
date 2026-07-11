@@ -1,7 +1,9 @@
 import { useState } from 'react'
 import {
   dropReasonLabel,
+  fetchRunChembl,
   type Candidate,
+  type Fragment,
   type GenerateProgress,
   type MoleculeCheck,
   type ValidationSummary,
@@ -16,6 +18,8 @@ export type CandidateDockState = {
 }
 
 type Props = {
+  /** The run id, for fetching ChEMBL reference molecules for this pocket. */
+  runId: string
   candidates: Candidate[]
   generating: boolean
   generateError?: string | null
@@ -237,6 +241,74 @@ function ValidationNote({ v }: { v: ValidationSummary }) {
   )
 }
 
+/**
+ * Known ChEMBL molecules docked as a REFERENCE, not as candidates.
+ *
+ * Everything else on this board is Claude's output. This block lets a user dock a
+ * published compound through the exact same dual-track + covalent pipeline, so a real
+ * drug and a novel scaffold are scored on one ruler. It answers the board's hardest
+ * question — is the geometry gate calibrated, or does nothing clear it? — by putting a
+ * molecule with a known answer next to the generated ones. These bypass the 430–620 Da
+ * generation gate on purpose: that gate steers what Claude proposes, not what you choose
+ * to dock as a control.
+ */
+function ChemblReference({
+  fragments,
+  dockState,
+  onDock,
+}: {
+  fragments: Fragment[]
+  dockState: Record<string, CandidateDockState>
+  onDock: (smiles: string) => void
+}) {
+  if (fragments.length === 0) return null
+  return (
+    <div className="mt-4">
+      <div className="flex items-baseline gap-2">
+        <span className="text-xs font-medium text-ink">Reference · ChEMBL</span>
+        <span className="text-xs text-muted">known compounds sized to this pocket — dock as a control</span>
+      </div>
+      <ul className="mt-2 max-h-[22rem] overflow-y-auto rounded-md border border-hairline bg-paper">
+        {fragments.map((f) => {
+          const state = dockState[f.smiles]
+          const busy = state?.phase === 'docking'
+          return (
+            <li key={f.chembl_id} className="border-b border-hairline p-3 last:border-b-0">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-xs font-medium text-ink">{f.name || f.chembl_id}</span>
+                    <span className="text-[11px] text-muted">{f.chembl_id}</span>
+                  </div>
+                  <p className="mt-0.5 break-all font-mono text-[11px] leading-snug text-muted">{f.smiles}</p>
+                  <div className="mt-1 flex gap-3">
+                    <Metric label="MW" value={f.mol_weight.toFixed(0)} />
+                    <Metric label="logP" value={f.logp.toFixed(2)} />
+                  </div>
+                </div>
+                <div className="flex flex-none flex-col items-end gap-1.5">
+                  {state ? (
+                    <DockBadge state={state} />
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => onDock(f.smiles)}
+                      disabled={busy}
+                      className="rounded-md border border-hairline px-3 py-1.5 text-xs text-ink transition-colors hover:border-ink disabled:opacity-50"
+                    >
+                      Dock
+                    </button>
+                  )}
+                </div>
+              </div>
+            </li>
+          )
+        })}
+      </ul>
+    </div>
+  )
+}
+
 function DockBadge({ state }: { state: CandidateDockState }) {
   if (state.phase === 'docking') {
     return (
@@ -268,6 +340,7 @@ function DockBadge({ state }: { state: CandidateDockState }) {
  * no polling. Presentation only; the page owns generate/dock lifecycle + state.
  */
 export default function CandidatePanel({
+  runId,
   candidates,
   generating,
   generateError,
@@ -281,6 +354,21 @@ export default function CandidatePanel({
   covalentResidue,
 }: Props) {
   const [n, setN] = useState(6)
+  const [chembl, setChembl] = useState<Fragment[]>([])
+  const [chemblLoading, setChemblLoading] = useState(false)
+  const [chemblError, setChemblError] = useState<string | null>(null)
+
+  const handleFetchChembl = () => {
+    setChemblLoading(true)
+    setChemblError(null)
+    fetchRunChembl(runId)
+      .then((frags) => {
+        setChembl(frags)
+        if (frags.length === 0) setChemblError('No ChEMBL molecules matched this pocket.')
+      })
+      .catch((e: unknown) => setChemblError(e instanceof Error ? e.message : 'ChEMBL fetch failed'))
+      .finally(() => setChemblLoading(false))
+  }
 
   return (
     <div>
@@ -288,6 +376,15 @@ export default function CandidatePanel({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <span className="text-sm font-medium text-ink">Candidate molecules</span>
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleFetchChembl}
+            disabled={chemblLoading || !canGenerate}
+            className="rounded-md border border-hairline px-3 py-1.5 text-xs text-muted transition-colors hover:border-ink hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
+            title="Fetch known ChEMBL molecules sized to this pocket, to dock as a reference alongside Claude's proposals"
+          >
+            {chemblLoading ? 'Fetching…' : 'Fetch from ChEMBL'}
+          </button>
           <div className="flex rounded-md border border-hairline bg-paper-deep p-0.5">
             {GEN_COUNTS.map((c) => (
               <button
@@ -313,6 +410,9 @@ export default function CandidatePanel({
           </button>
         </div>
       </div>
+
+      {chemblError && <p className="mt-3 text-xs text-muted">{chemblError}</p>}
+      <ChemblReference fragments={chembl} dockState={dockState} onDock={onDock} />
 
       {/* Once molecules have been docked, regeneration is a feedback round: every docked
           result (ranked by covalent feasibility) travels back into the design prompt, so

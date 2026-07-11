@@ -511,6 +511,7 @@ export default function RunViewerPage() {
             </div>
 
             <CandidatePanel
+              runId={id}
               candidates={candidates}
               generating={generating}
               generateError={generateError}
