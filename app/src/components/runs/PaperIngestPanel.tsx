@@ -63,7 +63,7 @@ function GroupHeader({ children }: { children: ReactNode }) {
 }
 
 const inputCls =
-  'rounded-md border border-hairline bg-paper px-3 py-2 text-sm text-ink outline-none transition-colors focus:border-[var(--color-accent)]'
+  'rounded-lg border border-hairline bg-paper px-3 py-2 text-sm text-ink outline-none transition-colors focus:border-ink'
 
 // The stages an extraction moves through, in order. There is no per-stage signal from the
 // backend (the one real stream is Claude's reasoning), so these are revealed on a gentle
@@ -368,7 +368,7 @@ export default function PaperIngestPanel({ onConfirmed }: Props) {
                   type="checkbox"
                   checked={site.covalent}
                   onChange={(e) => update({ covalent: e.target.checked })}
-                  className="h-4 w-4 rounded border-hairline accent-[var(--color-accent)]"
+                  className="h-4 w-4 rounded border-hairline accent-ink"
                 />
                 <span className="text-xs text-muted">Covalent (a warhead bonds the reactive residue)</span>
               </label>
@@ -383,7 +383,7 @@ export default function PaperIngestPanel({ onConfirmed }: Props) {
               <textarea
                 value={site.mechanism}
                 onChange={(e) => update({ mechanism: e.target.value })}
-                rows={3}
+                rows={5}
                 className={`${inputCls} resize-y leading-relaxed`}
               />
             </Field>
@@ -391,7 +391,7 @@ export default function PaperIngestPanel({ onConfirmed }: Props) {
               <textarea
                 value={site.pharmacophore}
                 onChange={(e) => update({ pharmacophore: e.target.value })}
-                rows={2}
+                rows={4}
                 className={`${inputCls} resize-y leading-relaxed`}
               />
             </Field>
@@ -419,7 +419,7 @@ export default function PaperIngestPanel({ onConfirmed }: Props) {
               <textarea
                 value={priorArtText}
                 onChange={(e) => setPriorArtText(e.target.value)}
-                rows={3}
+                rows={4}
                 placeholder="osimertinib&#10;afatinib"
                 spellCheck={false}
                 className={`${inputCls} resize-y leading-relaxed`}
