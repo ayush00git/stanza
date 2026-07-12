@@ -73,6 +73,72 @@ export async function extractPaper(file: File): Promise<ExtractedSite> {
   return (body.extraction ?? (body as ExtractedSite))
 }
 
+/** One streamed step of a live extraction: a chunk of Claude's reasoning about the paper. */
+export type PaperProgress = { stage: string; thinking?: string }
+
+export type PaperStreamCallbacks = {
+  onProgress: (p: PaperProgress) => void
+  onExtraction: (site: ExtractedSite) => void
+  onError: (message: string) => void
+}
+
+/**
+ * Stream a paper extraction. Uploads the PDF and reads the response as an SSE stream,
+ * surfacing Claude's summarized reasoning live (onProgress) before the final draft lands
+ * (onExtraction). It is a POST because the payload is a file, so this reads the response
+ * body directly rather than using EventSource (which is GET-only). Wraps
+ * POST /papers/extract/stream.
+ */
+export async function streamExtractPaper(file: File, cb: PaperStreamCallbacks): Promise<void> {
+  const form = new FormData()
+  form.append('file', file)
+  let res: Response
+  try {
+    res = await fetch('/papers/extract/stream', { method: 'POST', body: form })
+  } catch {
+    cb.onError('Lost connection to the extraction service.')
+    return
+  }
+  if (!res.ok || !res.body) {
+    cb.onError(await errorMessage(res, 'Could not read the paper'))
+    return
+  }
+
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buf = ''
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buf += decoder.decode(value, { stream: true })
+    // SSE frames are separated by a blank line.
+    let sep: number
+    while ((sep = buf.indexOf('\n\n')) !== -1) {
+      const frame = buf.slice(0, sep)
+      buf = buf.slice(sep + 2)
+      let event = 'message'
+      let data = ''
+      for (const line of frame.split('\n')) {
+        if (line.startsWith('event:')) event = line.slice(6).trim()
+        else if (line.startsWith('data:')) data += line.slice(5).trim()
+      }
+      if (!data) continue
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(data)
+      } catch {
+        continue
+      }
+      if (event === 'progress') cb.onProgress(parsed as PaperProgress)
+      else if (event === 'extraction') {
+        const p = parsed as { extraction?: ExtractedSite }
+        cb.onExtraction((p.extraction ?? (parsed as ExtractedSite)))
+      } else if (event === 'error') cb.onError((parsed as { error?: string }).error ?? 'Extraction failed')
+      // `done` needs no handling; the stream ends after it.
+    }
+  }
+}
+
 /**
  * Confirm an extracted (and possibly human-corrected) site, promoting it into the
  * curated store so it can drive a run. Wraps POST /papers/confirm.

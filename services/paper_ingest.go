@@ -24,21 +24,19 @@ const (
 	extractTool = "extract_site"
 )
 
-// ExtractSiteFromPDF asks Claude to read a scientific-paper PDF and pull out the
-// curated-site draft the rest of the pipeline is built on — target identity, the
-// reactive residue a covalent warhead should bond, the weight window, the prior art,
-// and a holo PDB — with the exact source sentence beside every field it fills.
-//
-// It hands Claude the PDF as a document block and forces a tool call whose schema
-// mirrors models.ExtractedSite, so the output is a parseable object rather than text.
-// Nothing here is trusted blindly: the provenance in Citations is what lets a human
-// ratify the draft before it drives docking, generation, and the weight gate.
-func ExtractSiteFromPDF(ctx context.Context, pdf []byte, filename string) (*models.ExtractedSite, error) {
-	if strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY")) == "" {
-		return nil, fmt.Errorf("ANTHROPIC_API_KEY is not set")
-	}
-	client := anthropic.NewClient()
+// PaperProgress is one streamed step of a live extraction: a stage marker, or a chunk of
+// Claude's summarized reasoning as it works through the paper. The final structured draft
+// is returned by ExtractSiteFromPDFStream itself, not carried on a progress event.
+type PaperProgress struct {
+	Stage    string `json:"stage"`              // "reading" | "thinking"
+	Thinking string `json:"thinking,omitempty"` // incremental reasoning text
+}
 
+// extractionParams builds the one Claude request both the blocking and streaming extractors
+// send: the PDF as a document block, the forced extract_site tool, and the system prompt
+// that makes the extraction trustworthy. Display is summarized so the streaming path can
+// surface Claude's reasoning; the blocking path simply ignores the thinking blocks.
+func extractionParams(pdf []byte, filename string) anthropic.MessageNewParams {
 	// The PDF ships as a base64 document block with no newlines in the payload.
 	b64 := base64.StdEncoding.EncodeToString(pdf)
 
@@ -140,14 +138,17 @@ func ExtractSiteFromPDF(ctx context.Context, pdf []byte, filename string) (*mode
 	user := fmt.Sprintf("Extract the curated-site draft from the attached paper (%s) by calling the extract_site "+
 		"tool. Fill only the fields the paper supports, and cite each one verbatim.", filename)
 
-	resp, err := client.Messages.New(ctx, anthropic.MessageNewParams{
+	return anthropic.MessageNewParams{
 		Model:     ingestModel,
 		MaxTokens: ingestMaxTokens,
 		System:    []anthropic.TextBlockParam{{Text: system}},
-		// Adaptive thinking: let the model reason about the paper — separating the mutation
-		// site from the reactive residue — before committing to the extraction.
-		Thinking: anthropic.ThinkingConfigParamUnion{OfAdaptive: &anthropic.ThinkingConfigAdaptiveParam{}},
-		Tools:    []anthropic.ToolUnionParam{{OfTool: &tool}},
+		// Adaptive thinking, summarized so the streaming path can show Claude reasoning about
+		// the paper — separating the mutation site from the reactive residue — before it
+		// commits to the extraction. The blocking path ignores the thinking blocks.
+		Thinking: anthropic.ThinkingConfigParamUnion{OfAdaptive: &anthropic.ThinkingConfigAdaptiveParam{
+			Display: anthropic.ThinkingConfigAdaptiveDisplaySummarized,
+		}},
+		Tools: []anthropic.ToolUnionParam{{OfTool: &tool}},
 		// Force the one tool so the answer is a structured ExtractedSite, not prose.
 		ToolChoice: anthropic.ToolChoiceUnionParam{OfTool: &anthropic.ToolChoiceToolParam{Name: extractTool}},
 		Messages: []anthropic.MessageParam{
@@ -157,11 +158,21 @@ func ExtractSiteFromPDF(ctx context.Context, pdf []byte, filename string) (*mode
 				anthropic.NewTextBlock(user),
 			),
 		},
-	})
+	}
+}
+
+// ExtractSiteFromPDF reads a paper PDF and returns the curated-site draft in one blocking
+// call. Nothing here is trusted blindly: the provenance in Citations is what lets a human
+// ratify the draft before it drives docking, generation, and the weight gate.
+func ExtractSiteFromPDF(ctx context.Context, pdf []byte, filename string) (*models.ExtractedSite, error) {
+	if strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY")) == "" {
+		return nil, fmt.Errorf("ANTHROPIC_API_KEY is not set")
+	}
+	client := anthropic.NewClient()
+	resp, err := client.Messages.New(ctx, extractionParams(pdf, filename))
 	if err != nil {
 		return nil, fmt.Errorf("claude request failed: %w", err)
 	}
-
 	for _, block := range resp.Content {
 		if tu, ok := block.AsAny().(anthropic.ToolUseBlock); ok && tu.Name == extractTool {
 			return parseExtraction([]byte(tu.JSON.Input.Raw()))
@@ -174,9 +185,53 @@ func ExtractSiteFromPDF(ctx context.Context, pdf []byte, filename string) (*mode
 	return nil, fmt.Errorf("claude returned no extraction (stop reason %q)", resp.StopReason)
 }
 
+// ExtractSiteFromPDFStream is ExtractSiteFromPDF with a progress callback: it streams
+// Claude's summarized reasoning as it works through the paper (onProgress, called only for
+// non-empty deltas), then returns the same parsed draft the blocking form returns. The
+// reasoning is worth surfacing because it is where the model does the load-bearing work —
+// deciding the reactive residue is Cys775, not the C797S mutation site — and watching it is
+// far better than a spinner. onProgress may be nil.
+func ExtractSiteFromPDFStream(ctx context.Context, pdf []byte, filename string, onProgress func(PaperProgress)) (*models.ExtractedSite, error) {
+	if strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY")) == "" {
+		return nil, fmt.Errorf("ANTHROPIC_API_KEY is not set")
+	}
+	client := anthropic.NewClient()
+
+	stream := client.Messages.NewStreaming(ctx, extractionParams(pdf, filename))
+	message := anthropic.Message{}
+	for stream.Next() {
+		event := stream.Current()
+		if err := message.Accumulate(event); err != nil {
+			return nil, fmt.Errorf("stream accumulate: %w", err)
+		}
+		if onProgress == nil {
+			continue
+		}
+		if ev, ok := event.AsAny().(anthropic.ContentBlockDeltaEvent); ok {
+			if d, ok := ev.Delta.AsAny().(anthropic.ThinkingDelta); ok && d.Thinking != "" {
+				onProgress(PaperProgress{Stage: "thinking", Thinking: d.Thinking})
+			}
+		}
+	}
+	if err := stream.Err(); err != nil {
+		return nil, fmt.Errorf("claude stream failed: %w", err)
+	}
+
+	for _, block := range message.Content {
+		if tu, ok := block.AsAny().(anthropic.ToolUseBlock); ok && tu.Name == extractTool {
+			return parseExtraction([]byte(tu.JSON.Input.Raw()))
+		}
+	}
+	if message.StopReason == anthropic.StopReasonRefusal {
+		return nil, fmt.Errorf("claude declined the request (refusal category %q: %s)",
+			message.StopDetails.Category, message.StopDetails.Explanation)
+	}
+	return nil, fmt.Errorf("claude returned no extraction (stop reason %q)", message.StopReason)
+}
+
 // parseExtraction unmarshals the tool call's JSON input into an ExtractedSite. It is
-// split out from ExtractSiteFromPDF so the parse can be exercised on a fixed blob
-// without a live API call — the network is the only part of extraction a test cannot own.
+// split out so the parse can be exercised on a fixed blob without a live API call — the
+// network is the only part of extraction a test cannot own.
 func parseExtraction(raw []byte) (*models.ExtractedSite, error) {
 	var site models.ExtractedSite
 	if err := json.Unmarshal(raw, &site); err != nil {

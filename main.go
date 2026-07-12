@@ -79,6 +79,7 @@ func main() {
 	// then confirm the human-reviewed draft into the runtime site registry so a
 	// subsequent POST /runs drives off it.
 	r.POST("/papers/extract", handlers.ExtractPaperHandler)
+	r.POST("/papers/extract/stream", handlers.ExtractPaperStreamHandler)
 	r.POST("/papers/confirm", handlers.ConfirmPaperHandler)
 	r.GET("/runs/:id", handlers.GetRunHandler)
 	r.GET("/runs", handlers.ListRunsHandler)

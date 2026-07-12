@@ -1,5 +1,5 @@
 import { useRef, useState, type DragEvent, type ReactNode } from 'react'
-import { confirmPaper, extractPaper, type ExtractedSite } from '../../lib/papers'
+import { confirmPaper, streamExtractPaper, type ExtractedSite } from '../../lib/papers'
 
 /** Human-readable file size, e.g. "1.4 MB". */
 function fileSize(bytes: number): string {
@@ -82,6 +82,8 @@ export default function PaperIngestPanel({ onConfirmed }: Props) {
   const [priorArtText, setPriorArtText] = useState('')
   const [pocketText, setPocketText] = useState('')
   const [dragging, setDragging] = useState(false)
+  // Claude's summarized reasoning, accumulated live while it reads the paper.
+  const [thinking, setThinking] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
 
   /** Accept a dropped/picked file only if it looks like a PDF. */
@@ -110,17 +112,22 @@ export default function PaperIngestPanel({ onConfirmed }: Props) {
     if (!file || phase === 'extracting') return
     setPhase('extracting')
     setError(null)
-    extractPaper(file)
-      .then((s) => {
+    setThinking('')
+    streamExtractPaper(file, {
+      onProgress: (p) => {
+        if (p.thinking) setThinking((prev) => prev + p.thinking)
+      },
+      onExtraction: (s) => {
         setSite(s)
         setPriorArtText((s.prior_art ?? []).join('\n'))
         setPocketText((s.pocket_residues ?? []).join(', '))
         setPhase('review')
-      })
-      .catch((e: unknown) => {
-        setError(e instanceof Error ? e.message : 'Could not read the paper')
+      },
+      onError: (message) => {
+        setError(message)
         setPhase('idle')
-      })
+      },
+    })
   }
 
   const handleConfirm = () => {
@@ -198,16 +205,31 @@ export default function PaperIngestPanel({ onConfirmed }: Props) {
             />
             {phase === 'extracting' ? (
               // The Claude call reads the whole document, so this runs a minute or two.
-              <div className="flex flex-col items-center gap-3 py-1">
-                <svg viewBox="0 0 24 24" className="h-6 w-6 animate-spin text-claude" fill="none">
-                  <circle cx="12" cy="12" r="9" stroke="currentColor" strokeOpacity="0.2" strokeWidth="3" />
-                  <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-                </svg>
-                <p className="text-sm font-medium text-claude-deep">Reading the paper…</p>
-                <p className="text-xs text-muted">
-                  Claude is working through the full document. This usually takes a minute or two.
-                </p>
-                {file && <p className="text-xs text-muted">{file.name}</p>}
+              // Its summarized reasoning streams in live, which is where the real work shows.
+              <div className="flex w-full flex-col items-center gap-3 py-1">
+                <div className="flex items-center gap-2">
+                  <svg viewBox="0 0 24 24" className="h-5 w-5 animate-spin text-claude" fill="none">
+                    <circle cx="12" cy="12" r="9" stroke="currentColor" strokeOpacity="0.2" strokeWidth="3" />
+                    <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+                  </svg>
+                  <p className="text-sm font-medium text-claude-deep">Claude is reading the paper…</p>
+                </div>
+                {thinking ? (
+                  <div
+                    className="max-h-56 w-full overflow-y-auto rounded-md border border-hairline bg-paper px-3 py-2 text-left"
+                    aria-live="polite"
+                  >
+                    <p className="whitespace-pre-wrap text-xs leading-relaxed text-muted">
+                      {thinking}
+                      <span className="ml-0.5 inline-block h-3 w-1 animate-pulse bg-claude align-middle" />
+                    </p>
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted">
+                    Working through the full document. Its reasoning will appear here as it goes.
+                  </p>
+                )}
+                {file && <p className="text-xs text-muted/70">{file.name}</p>}
               </div>
             ) : file ? (
               <>
