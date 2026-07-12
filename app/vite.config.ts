@@ -16,6 +16,9 @@ export default defineConfig({
       '/complex': apiTarget,
       '/chembl': apiTarget,
       '/dock': apiTarget,
+      // /papers is API-only (extract / extract/stream / confirm); no SPA route lands
+      // here, so a plain proxy is fine. The SSE stream passes through untouched.
+      '/papers': apiTarget,
       // /profiles is API-only; the SPA route is /profile (singular), so a plain
       // proxy is fine — no browser navigations land on /profiles.
       '/profiles': apiTarget,
