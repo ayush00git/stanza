@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { createRun, listRuns, listRunsByProfile, type Run } from '../lib/api'
 import { useActiveProfile } from '../lib/profile'
-import Thinking, { RUN_PHASES } from '../components/Thinking'
+import { Steps, RUN_PHASES } from '../components/Thinking'
 import PaperIngestPanel from '../components/runs/PaperIngestPanel'
 
 type ListStatus = 'loading' | 'done' | 'error'
@@ -200,7 +200,7 @@ export default function RunsPage() {
             </div>
           </form>
           )}
-          {creating && <Thinking phases={RUN_PHASES} className="mt-4" />}
+          {creating && <Steps phases={RUN_PHASES} className="mt-4" />}
         </section>
 
         {/* Recent runs */}

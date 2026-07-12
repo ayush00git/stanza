@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type DragEvent, type ReactNode } from 'react'
 import { confirmPaper, streamExtractPaper, type ExtractedSite } from '../../lib/papers'
+import { Steps } from '../Thinking'
 
 /** Human-readable file size, e.g. "1.4 MB". */
 function fileSize(bytes: number): string {
@@ -242,29 +243,9 @@ export default function PaperIngestPanel({ onConfirmed }: Props) {
               // below, which is where the real work shows.
               <div className="flex w-full flex-col items-stretch gap-4 py-1 text-left">
                 {/* Sequential steps: revealed one by one, never erased. Completed ones keep a
-                    check; the current one spins. All in Claude's terracotta. */}
-                <ol className="flex flex-col gap-2">
-                  {EXTRACT_STEPS.slice(0, stepIndex + 1).map((label, i) => {
-                    const done = i < stepIndex
-                    return (
-                      <li key={label} className="flex items-center gap-2.5">
-                        {done ? (
-                          <svg viewBox="0 0 24 24" className="h-4 w-4 flex-none text-claude" fill="none" stroke="currentColor" strokeWidth="2.6">
-                            <path d="m5 13 4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
-                          </svg>
-                        ) : (
-                          <svg viewBox="0 0 24 24" className="h-4 w-4 flex-none animate-spin text-claude" fill="none">
-                            <circle cx="12" cy="12" r="9" stroke="currentColor" strokeOpacity="0.25" strokeWidth="3" />
-                            <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-                          </svg>
-                        )}
-                        <span className={`text-sm ${done ? 'text-claude-deep/60' : 'font-medium text-claude-deep'}`}>
-                          {label}
-                        </span>
-                      </li>
-                    )
-                  })}
-                </ol>
+                    check; the current one spins. Driven by this panel's own stepIndex (its
+                    timer + the first reasoning delta), so it advances with real progress. */}
+                <Steps phases={EXTRACT_STEPS} activeIndex={stepIndex} />
 
                 {/* Claude's live reasoning, under the steps. */}
                 {thinking ? (

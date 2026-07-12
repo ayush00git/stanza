@@ -8,6 +8,7 @@ import {
   type MoleculeCheck,
   type ValidationSummary,
 } from '../../lib/api'
+import { Steps, GEN_STEPS, genStepIndex } from '../Thinking'
 
 /** Per-candidate docking phase, keyed by SMILES in the page's dockState map. */
 export type CandidatePhase = 'docking' | 'done' | 'error'
@@ -75,23 +76,25 @@ function GenerationStream({
   const pct =
     progress && progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : null
   const kept = checks.filter((c) => c.kept).length
+  // The stream reports a real stage; map it onto the stacked step list so the steps
+  // advance with the server, not on a timer.
+  const stepIdx = genStepIndex(progress?.stage ?? '')
 
   return (
     <div className="mt-3 rounded-md border border-hairline bg-paper-deep/40 px-3 py-2.5" aria-live="polite">
-      <div className="flex flex-wrap items-baseline gap-2">
-        <span className="inline-flex items-center gap-1.5 text-xs font-medium text-accent">
-          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
-          {progress?.stage === 'claude' ? 'Claude is designing' : 'Generating'}
-        </span>
-        <span className="text-xs text-muted">
-          {progress?.message ?? 'starting'}
-          {progress && progress.total > 0 && ` · step ${progress.done} of ${progress.total}`}
-        </span>
-      </div>
+      {/* Sequential steps in Claude's terracotta, driven by the stream's stage. */}
+      <Steps phases={GEN_STEPS} activeIndex={stepIdx} />
+
+      {/* The server's own status line under the steps: its message, and the per-molecule
+          count once screening starts. */}
+      <p className="mt-2.5 text-xs text-muted">
+        {progress?.message ?? 'starting'}
+        {progress && progress.total > 0 && ` · ${progress.done} of ${progress.total}`}
+      </p>
 
       <div className="mt-2 h-0.5 overflow-hidden rounded-full bg-hairline">
         <div
-          className="h-full rounded-full bg-accent transition-[width] duration-500"
+          className="h-full rounded-full bg-claude transition-[width] duration-500"
           style={{ width: `${pct ?? 4}%` }}
         />
       </div>
