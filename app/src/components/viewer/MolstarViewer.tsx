@@ -13,6 +13,8 @@ interface MolstarViewerProps {
   highlight?: HighlightResidue[]
   /** Raw PDB text of a docked ligand pose to overlay on the structure. */
   pose?: string | null
+  /** Auto-rotate the structure (Mol* spin), for an expanded / B-roll view. */
+  spin?: boolean
 }
 
 /**
@@ -27,6 +29,7 @@ export default function MolstarViewer({
   format,
   highlight,
   pose,
+  spin,
 }: MolstarViewerProps) {
   const { containerRef, isLoading, error } = useMolstar({
     structureUrl: url,
@@ -35,6 +38,7 @@ export default function MolstarViewer({
     label,
     highlight,
     pose,
+    spin,
   })
 
   return (

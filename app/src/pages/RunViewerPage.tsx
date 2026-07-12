@@ -53,12 +53,14 @@ function StructurePanel({
   representation,
   highlight,
   pose,
+  spin,
 }: {
   url?: string
   label: string
   representation: string
   highlight?: HighlightResidue[]
   pose?: string | null
+  spin?: boolean
 }) {
   if (!url) {
     return (
@@ -80,6 +82,7 @@ function StructurePanel({
       format="pdb"
       highlight={highlight}
       pose={pose}
+      spin={spin}
     />
   )
 }
@@ -157,6 +160,16 @@ export default function RunViewerPage() {
   const [run, setRun] = useState<Run | null>(null)
   const [runError, setRunError] = useState<string | null>(null)
   const [representation, setRepresentation] = useState(DEFAULT_REPRESENTATION)
+  // Fullscreen, auto-rotating view of the WT/mutant pair (a display / B-roll view).
+  const [expanded, setExpanded] = useState(false)
+  useEffect(() => {
+    if (!expanded) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setExpanded(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [expanded])
 
   // Pocket analysis (slow: fpocket on both tracks) — kept separate from the run load.
   const [pockets, setPockets] = useState<RunPocketAnalysis | null>(null)
@@ -443,7 +456,18 @@ export default function RunViewerPage() {
                 <p className="text-sm text-muted">No mutant structure was built for this run</p>
               </div>
             ) : (
-              <div className="mt-4 flex flex-col overflow-hidden rounded-lg border border-hairline bg-paper-deep">
+              <div className="relative mt-4 flex flex-col overflow-hidden rounded-lg border border-hairline bg-paper-deep">
+                <button
+                  type="button"
+                  onClick={() => setExpanded(true)}
+                  title="Expand and rotate"
+                  className="absolute right-2 top-2 z-10 flex items-center gap-1.5 rounded-md border border-hairline bg-paper/90 px-2.5 py-1 text-xs font-medium text-ink shadow-sm backdrop-blur-sm transition-colors hover:border-ink"
+                >
+                  <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.8">
+                    <path d="M4 9V4h5M20 15v5h-5M20 9V4h-5M4 15v5h5" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                  Expand
+                </button>
                 <div className="flex min-h-[420px] flex-col md:h-[56vh] md:min-h-[460px] md:flex-row">
                   <div className="relative flex min-h-[360px] flex-1 flex-col border-hairline max-md:border-b md:min-h-0 md:border-r">
                     <StructurePanel
@@ -477,6 +501,51 @@ export default function RunViewerPage() {
                         onClear={() => setActiveSmiles(null)}
                       />
                     )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Expanded, auto-rotating view of the pair (a display / B-roll view). */}
+            {expanded && hasStructures && (
+              <div
+                className="fixed inset-0 z-50 flex flex-col bg-ink/95 p-4 backdrop-blur-sm"
+                onClick={() => setExpanded(false)}
+              >
+                <div className="flex items-center justify-between px-1 pb-3">
+                  <span className="text-sm font-medium text-paper">
+                    {run?.uniprot_id}
+                    {targetResidue ? ` · ${targetResidue}` : ''}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setExpanded(false)}
+                    className="rounded-md px-3 py-1 text-sm text-paper/80 transition-colors hover:text-paper"
+                  >
+                    Close ✕
+                  </button>
+                </div>
+                <div
+                  className="flex min-h-0 flex-1 flex-col gap-3 md:flex-row"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex min-h-0 flex-1 overflow-hidden rounded-lg bg-paper-deep">
+                    <StructurePanel
+                      url={wtUrl}
+                      label="Wild type"
+                      representation={representation}
+                      highlight={highlight}
+                      spin
+                    />
+                  </div>
+                  <div className="flex min-h-0 flex-1 overflow-hidden rounded-lg bg-paper-deep">
+                    <StructurePanel
+                      url={mutUrl}
+                      label="Mutant"
+                      representation={representation}
+                      highlight={highlight}
+                      spin
+                    />
                   </div>
                 </div>
               </div>

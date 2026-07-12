@@ -58,6 +58,8 @@ interface UseMolstarOptions {
    * translucent halo. null/undefined removes any existing pose overlay.
    */
   pose?: string | null
+  /** Auto-rotate the camera (Mol* trackball spin), for a display / B-roll view. */
+  spin?: boolean
 }
 
 /**
@@ -74,6 +76,7 @@ export function useMolstar({
   label = '',
   highlight,
   pose,
+  spin = false,
 }: UseMolstarOptions) {
   const containerRef = useRef<HTMLElementWithRoot | null>(null)
   const pluginRef = useRef<any>(null)
@@ -230,6 +233,21 @@ export function useMolstar({
     setPose(plugin, pose)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pose, isLoading])
+
+  // Auto-spin the camera for a display / B-roll view. Re-applied after a (re)load
+  // so a freshly loaded structure keeps spinning; toggled off cleanly when disabled.
+  useEffect(() => {
+    const plugin = pluginRef.current
+    if (!plugin || !plugin.isInitialized || !plugin.canvas3d) return
+    plugin.canvas3d.setProps({
+      trackball: {
+        animate: spin
+          ? { name: 'spin', params: { speed: 1 } }
+          : { name: 'off', params: {} },
+      },
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [spin, isLoading])
 
   const loadStructure = async (plugin: any, url: string) => {
     setIsLoading(true)
