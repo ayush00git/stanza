@@ -433,6 +433,20 @@ the pipeline's logic maps onto those published discovery campaigns, and what the
 does not license as a claim, is in
 [`docs/features/12-medchem-campaign-comparison.md`](docs/features/12-medchem-campaign-comparison.md).
 
+## Must reads
+
+If you read nothing else in this repo, read these three:
+
+- [`docs/features/11-abl-t315i-positive-control.md`](docs/features/11-abl-t315i-positive-control.md):
+  the validated positive control. A steric resistance mutation where `selectivity` is a real
+  quantity, two known drugs, and one known answer fixed before the docks finished. This is where the
+  dual-track machinery is shown to work.
+- [`docs/features/12-medchem-campaign-comparison.md`](docs/features/12-medchem-campaign-comparison.md):
+  how the pipeline's logic maps onto the published discovery campaigns of the exact control drugs
+  (sotorasib, adagrasib, ponatinib), and what that comparison does and does not license as a claim.
+- [`jm5c02924-walkthrough.md`](jm5c02924-walkthrough.md): a full worked example, ingesting a paper
+  and following it through the mutant build, generation, docking and ranking.
+
 ## License
 
 Apache License 2.0. See [`LICENSE`](LICENSE).
