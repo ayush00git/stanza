@@ -417,8 +417,21 @@ Constants and claims trace to the primary literature:
 - Vasta et al. 2022, *Nat Chem Biol*. Reversible switch-II engagement of **wild-type** KRAS.
 - Meller et al. 2023, *JCTC*. AlphaFold does not open cryptic pockets.
 
+The discovery campaigns of the exact control drugs, the manual structure-based design loops Stanza
+automates:
+
+- Lanman et al. 2020, *J. Med. Chem.* 63:52. Sotorasib (AMG 510); switch-II conformational locking
+  to satisfy the warhead trajectory.
+- Fell et al. 2020, *J. Med. Chem.* 63:6679. Adagrasib (MRTX849); reversible-affinity versus
+  covalent-reactivity balance; 604 Da beyond Lipinski.
+- Huang et al. 2010, *J. Med. Chem.* 53:4701. Ponatinib (AP24534); ethynyl linker designed to
+  bypass the T315I gatekeeper.
+
 The full audit, with every claim independently sourced and mapped onto the code, is in
-[`docs/features/10-covalent-validity-audit.md`](docs/features/10-covalent-validity-audit.md).
+[`docs/features/10-covalent-validity-audit.md`](docs/features/10-covalent-validity-audit.md). How
+the pipeline's logic maps onto those published discovery campaigns, and what the comparison does and
+does not license as a claim, is in
+[`docs/features/12-medchem-campaign-comparison.md`](docs/features/12-medchem-campaign-comparison.md).
 
 ## License
 
