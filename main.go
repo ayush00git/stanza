@@ -75,6 +75,11 @@ func main() {
 	// the experimental → AlphaFold ladder plus residue verification; GET fetches
 	// a single run or lists all.
 	r.POST("/runs", handlers.CreateRunHandler)
+	// Paper ingestion: extract a curated-site draft from an uploaded PDF via Claude,
+	// then confirm the human-reviewed draft into the runtime site registry so a
+	// subsequent POST /runs drives off it.
+	r.POST("/papers/extract", handlers.ExtractPaperHandler)
+	r.POST("/papers/confirm", handlers.ConfirmPaperHandler)
 	r.GET("/runs/:id", handlers.GetRunHandler)
 	r.GET("/runs", handlers.ListRunsHandler)
 	// Stage-2 generated structures (matched WT/mutant pair) for a run.
