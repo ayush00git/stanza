@@ -117,7 +117,7 @@ export default function RunsPage() {
           </p>
 
           {/* Two ways to start a run: type the target by hand, or lift it from a paper PDF. */}
-          <div className="mt-6 inline-flex rounded-md border border-hairline bg-paper-deep p-0.5">
+          <div className="mt-6 inline-flex rounded-full border border-hairline bg-paper-deep p-1">
             {(
               [
                 ['manual', 'Enter manually'],
@@ -128,9 +128,9 @@ export default function RunsPage() {
                 key={value}
                 type="button"
                 onClick={() => setSource(value)}
-                className={`rounded px-3 py-1 text-xs transition-colors ${
+                className={`rounded-full px-4 py-1.5 text-xs font-medium transition-colors ${
                   source === value
-                    ? 'bg-paper text-ink shadow-[0_1px_2px_rgba(18,22,28,0.12)]'
+                    ? 'bg-ink text-paper shadow-[0_1px_2px_rgba(18,22,28,0.2)]'
                     : 'text-muted hover:text-ink'
                 }`}
               >

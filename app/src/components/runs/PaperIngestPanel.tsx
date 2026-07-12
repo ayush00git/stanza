@@ -1,5 +1,12 @@
-import { useState, type ReactNode } from 'react'
+import { useRef, useState, type DragEvent, type ReactNode } from 'react'
 import { confirmPaper, extractPaper, type ExtractedSite } from '../../lib/papers'
+
+/** Human-readable file size, e.g. "1.4 MB". */
+function fileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
 
 type Props = {
   /** Called once the confirmed site is committed server-side, so the page can start a run. */
@@ -74,6 +81,26 @@ export default function PaperIngestPanel({ onConfirmed }: Props) {
   // are allowed; they are parsed back into arrays only at confirm time.
   const [priorArtText, setPriorArtText] = useState('')
   const [pocketText, setPocketText] = useState('')
+  const [dragging, setDragging] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  /** Accept a dropped/picked file only if it looks like a PDF. */
+  const acceptFile = (f: File | null | undefined) => {
+    if (!f) return
+    if (!f.name.toLowerCase().endsWith('.pdf')) {
+      setError('That is not a PDF. Upload the paper as a .pdf file.')
+      return
+    }
+    setFile(f)
+    setError(null)
+  }
+
+  const onDrop = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    setDragging(false)
+    if (phase === 'extracting') return
+    acceptFile(e.dataTransfer.files?.[0])
+  }
 
   /** Merge a patch into the edited site. */
   const update = (patch: Partial<ExtractedSite>) =>
@@ -135,34 +162,86 @@ export default function PaperIngestPanel({ onConfirmed }: Props) {
             reactive residue, pocket, weight window) with the sentence behind each field, for
             you to confirm before it drives a run.
           </p>
-          <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center">
+
+          {/* Dropzone: a whole clickable/droppable area, not a bare file input. */}
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={() => phase !== 'extracting' && inputRef.current?.click()}
+            onKeyDown={(e) => {
+              if ((e.key === 'Enter' || e.key === ' ') && phase !== 'extracting') {
+                e.preventDefault()
+                inputRef.current?.click()
+              }
+            }}
+            onDragOver={(e) => {
+              e.preventDefault()
+              if (phase !== 'extracting') setDragging(true)
+            }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={onDrop}
+            className={`mt-4 flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed px-6 py-8 text-center transition-colors ${
+              phase === 'extracting'
+                ? 'cursor-default border-hairline bg-paper-deep/60'
+                : dragging
+                  ? 'cursor-pointer border-accent bg-accent-soft'
+                  : 'cursor-pointer border-hairline bg-paper hover:border-ink'
+            }`}
+          >
             <input
+              ref={inputRef}
               type="file"
-              accept=".pdf"
-              onChange={(e) => {
-                setFile(e.target.files?.[0] ?? null)
-                setError(null)
-              }}
+              accept=".pdf,application/pdf"
+              onChange={(e) => acceptFile(e.target.files?.[0])}
               disabled={phase === 'extracting'}
-              className="block w-full min-w-0 flex-1 text-sm text-muted file:mr-3 file:rounded-md file:border file:border-hairline file:bg-paper file:px-3 file:py-1.5 file:text-sm file:text-ink file:transition-colors hover:file:border-ink disabled:opacity-50"
+              className="hidden"
             />
+            {phase === 'extracting' ? (
+              // The Claude call reads the whole document, so this runs a minute or two.
+              <div className="flex flex-col items-center gap-3 py-1">
+                <svg viewBox="0 0 24 24" className="h-6 w-6 animate-spin text-claude" fill="none">
+                  <circle cx="12" cy="12" r="9" stroke="currentColor" strokeOpacity="0.2" strokeWidth="3" />
+                  <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+                </svg>
+                <p className="text-sm font-medium text-claude-deep">Reading the paper…</p>
+                <p className="text-xs text-muted">
+                  Claude is working through the full document. This usually takes a minute or two.
+                </p>
+                {file && <p className="text-xs text-muted">{file.name}</p>}
+              </div>
+            ) : file ? (
+              <>
+                <svg viewBox="0 0 24 24" className="h-7 w-7 text-accent" fill="none" stroke="currentColor" strokeWidth="1.6">
+                  <path d="M14 3v4a1 1 0 0 0 1 1h4" strokeLinecap="round" strokeLinejoin="round" />
+                  <path d="M5 3h9l5 5v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z" strokeLinejoin="round" />
+                </svg>
+                <p className="text-sm font-medium text-ink">{file.name}</p>
+                <p className="text-xs text-muted">{fileSize(file.size)} · click to choose a different file</p>
+              </>
+            ) : (
+              <>
+                <svg viewBox="0 0 24 24" className="h-7 w-7 text-muted" fill="none" stroke="currentColor" strokeWidth="1.6">
+                  <path d="M12 16V4m0 0 4 4m-4-4-4 4" strokeLinecap="round" strokeLinejoin="round" />
+                  <path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" strokeLinecap="round" />
+                </svg>
+                <p className="text-sm font-medium text-ink">Drop a PDF here, or click to browse</p>
+                <p className="text-xs text-muted">A medicinal-chemistry paper describing the target and its inhibitors</p>
+              </>
+            )}
+          </div>
+
+          <div className="mt-4 flex items-center justify-end">
             <button
               type="button"
               onClick={handleExtract}
               disabled={!file || phase === 'extracting'}
               className="rounded-md border border-ink bg-ink px-4 py-2 text-sm font-medium text-paper transition-colors hover:bg-transparent hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {phase === 'extracting' ? 'Reading…' : 'Extract'}
+              {phase === 'extracting' ? 'Reading…' : 'Extract with Claude'}
             </button>
           </div>
 
-          {phase === 'extracting' && (
-            <p className="mt-4 inline-flex items-center gap-2 text-sm text-claude-deep">
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-claude" />
-              Reading the paper. This takes a moment while Claude works through the full text.
-            </p>
-          )}
-          {error && <p className="mt-4 text-sm text-conf-verylow">{error}</p>}
+          {error && <p className="mt-3 text-sm text-conf-verylow">{error}</p>}
         </div>
       )}
 
