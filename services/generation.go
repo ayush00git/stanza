@@ -210,7 +210,7 @@ func writeWeightGate(b *strings.Builder, g *SiteGuidance) {
 // returned truncated ARS-1620 analogues, below the viable weight range, missing the
 // substituent that makes the series potent.
 func writeCovalentBrief(b *strings.Builder, covalentResidue string, site *KnownSite) {
-	fmt.Fprintf(b, "\nThis is a COVALENT target. The mutation installs %s, and its thiol is the anchor.\n",
+	fmt.Fprintf(b, "\nThis is a COVALENT target. The warhead must bond %s, and its thiol is the anchor.\n",
 		covalentResidue)
 
 	if site != nil && site.Guidance != nil {
@@ -439,6 +439,13 @@ func GenerateCandidatesProgress(ctx context.Context, run *models.Run, n int, mu 
 		covalentResidue = resToken(run.Mutagenesis.MutantResidue, run.Mutagenesis.TargetResidueNum)
 	}
 	site := LookupKnownSite(run.UniprotID, run.Mutation, run.SiteHint)
+	// A site can name a reactive residue that is NOT the mutation site: EGFR C797S removes
+	// the cysteine osimertinib bonded, so the design targets Cys775 instead. The mutation-
+	// site derivation above misses this — the mutant residue is Ser, not a nucleophile our
+	// warheads react with — so an explicit covalent residue on the site takes precedence.
+	if site != nil && site.CovalentResidue != "" {
+		covalentResidue = site.CovalentResidue
+	}
 
 	brief := "designing against the mutant pocket"
 	if covalentResidue != "" {
