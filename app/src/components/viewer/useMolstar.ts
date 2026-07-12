@@ -234,18 +234,27 @@ export function useMolstar({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pose, isLoading])
 
-  // Auto-spin the camera for a display / B-roll view. Re-applied after a (re)load
-  // so a freshly loaded structure keeps spinning; toggled off cleanly when disabled.
+  // Auto-spin the camera for a display / B-roll view. Setting the trackball prop is
+  // not enough on its own: the spin only advances while the canvas3d animation loop is
+  // running, so animate() is kicked when spin turns on. Applied on (re)load and once
+  // more shortly after, in case the load's camera reset clobbered it.
   useEffect(() => {
-    const plugin = pluginRef.current
-    if (!plugin || !plugin.isInitialized || !plugin.canvas3d) return
-    plugin.canvas3d.setProps({
-      trackball: {
-        animate: spin
-          ? { name: 'spin', params: { speed: 1 } }
-          : { name: 'off', params: {} },
-      },
-    })
+    const apply = () => {
+      const plugin = pluginRef.current
+      const c3d = plugin?.canvas3d
+      if (!plugin?.isInitialized || !c3d) return
+      c3d.setProps({
+        trackball: {
+          animate: spin
+            ? { name: 'spin', params: { speed: 0.4 } }
+            : { name: 'off', params: {} },
+        },
+      })
+      if (spin) c3d.animate()
+    }
+    apply()
+    const t = setTimeout(apply, 500)
+    return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [spin, isLoading])
 
