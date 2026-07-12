@@ -1,4 +1,4 @@
-import { useRef, useState, type DragEvent, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type DragEvent, type ReactNode } from 'react'
 import { confirmPaper, streamExtractPaper, type ExtractedSite } from '../../lib/papers'
 
 /** Human-readable file size, e.g. "1.4 MB". */
@@ -64,6 +64,19 @@ function GroupHeader({ children }: { children: ReactNode }) {
 const inputCls =
   'rounded-md border border-hairline bg-paper px-3 py-2 text-sm text-ink outline-none transition-colors focus:border-[var(--color-accent)]'
 
+// The stages an extraction moves through, in order. There is no per-stage signal from the
+// backend (the one real stream is Claude's reasoning), so these are revealed on a gentle
+// cadence and parked on the last one until the extraction actually lands — the labels
+// describe the genuine pipeline, and none is ever marked done before the run completes.
+const EXTRACT_STEPS = [
+  'Uploading the paper',
+  'Opening the document',
+  'Locating the target and mutation',
+  'Identifying the reactive residue',
+  'Grounding each field in the source',
+  'Drafting the curated site',
+]
+
 /**
  * PaperIngestPanel — the PDF front door to a run. A paper is uploaded, Claude reads it
  * and proposes a curated-site draft, and every field is presented editable beside the
@@ -84,7 +97,21 @@ export default function PaperIngestPanel({ onConfirmed }: Props) {
   const [dragging, setDragging] = useState(false)
   // Claude's summarized reasoning, accumulated live while it reads the paper.
   const [thinking, setThinking] = useState('')
+  // How far the step list has been revealed (index into EXTRACT_STEPS). Steps above it are
+  // done, the step at it is in progress; it parks on the last step until the extraction lands.
+  const [stepIndex, setStepIndex] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
+
+  // While extracting, reveal the steps one at a time on a gentle cadence, stopping at the
+  // final step (which keeps spinning until the extraction returns). Cleared the moment the
+  // phase leaves 'extracting', so a completed or failed run never leaves a stale timer.
+  useEffect(() => {
+    if (phase !== 'extracting') return
+    const id = setInterval(() => {
+      setStepIndex((i) => Math.min(i + 1, EXTRACT_STEPS.length - 1))
+    }, 11000)
+    return () => clearInterval(id)
+  }, [phase])
 
   /** Accept a dropped/picked file only if it looks like a PDF. */
   const acceptFile = (f: File | null | undefined) => {
@@ -113,9 +140,15 @@ export default function PaperIngestPanel({ onConfirmed }: Props) {
     setPhase('extracting')
     setError(null)
     setThinking('')
+    setStepIndex(0)
     streamExtractPaper(file, {
       onProgress: (p) => {
-        if (p.thinking) setThinking((prev) => prev + p.thinking)
+        if (p.thinking) {
+          setThinking((prev) => prev + p.thinking)
+          // The first reasoning delta is proof Claude has the document open — jump past
+          // "Uploading" so the list tracks reality, not just the timer.
+          setStepIndex((i) => (i < 2 ? 2 : i))
+        }
       },
       onExtraction: (s) => {
         setSite(s)
@@ -205,18 +238,38 @@ export default function PaperIngestPanel({ onConfirmed }: Props) {
             />
             {phase === 'extracting' ? (
               // The Claude call reads the whole document, so this runs a minute or two.
-              // Its summarized reasoning streams in live, which is where the real work shows.
-              <div className="flex w-full flex-col items-center gap-3 py-1">
-                <div className="flex items-center gap-2">
-                  <svg viewBox="0 0 24 24" className="h-5 w-5 animate-spin text-claude" fill="none">
-                    <circle cx="12" cy="12" r="9" stroke="currentColor" strokeOpacity="0.2" strokeWidth="3" />
-                    <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-                  </svg>
-                  <p className="text-sm font-medium text-claude-deep">Claude is reading the paper…</p>
-                </div>
+              // A stacked step list tracks the stages; its summarized reasoning streams in
+              // below, which is where the real work shows.
+              <div className="flex w-full flex-col items-stretch gap-4 py-1 text-left">
+                {/* Sequential steps: revealed one by one, never erased. Completed ones keep a
+                    check; the current one spins. All in Claude's terracotta. */}
+                <ol className="flex flex-col gap-2">
+                  {EXTRACT_STEPS.slice(0, stepIndex + 1).map((label, i) => {
+                    const done = i < stepIndex
+                    return (
+                      <li key={label} className="flex items-center gap-2.5">
+                        {done ? (
+                          <svg viewBox="0 0 24 24" className="h-4 w-4 flex-none text-claude" fill="none" stroke="currentColor" strokeWidth="2.6">
+                            <path d="m5 13 4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        ) : (
+                          <svg viewBox="0 0 24 24" className="h-4 w-4 flex-none animate-spin text-claude" fill="none">
+                            <circle cx="12" cy="12" r="9" stroke="currentColor" strokeOpacity="0.25" strokeWidth="3" />
+                            <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+                          </svg>
+                        )}
+                        <span className={`text-sm ${done ? 'text-claude-deep/60' : 'font-medium text-claude-deep'}`}>
+                          {label}
+                        </span>
+                      </li>
+                    )
+                  })}
+                </ol>
+
+                {/* Claude's live reasoning, under the steps. */}
                 {thinking ? (
                   <div
-                    className="max-h-56 w-full overflow-y-auto rounded-md border border-hairline bg-paper px-3 py-2 text-left"
+                    className="max-h-56 w-full overflow-y-auto rounded-md border border-hairline bg-paper px-3 py-2"
                     aria-live="polite"
                   >
                     <p className="whitespace-pre-wrap text-xs leading-relaxed text-muted">
@@ -226,7 +279,7 @@ export default function PaperIngestPanel({ onConfirmed }: Props) {
                   </div>
                 ) : (
                   <p className="text-xs text-muted">
-                    Working through the full document. Its reasoning will appear here as it goes.
+                    Working through the full document. Claude's reasoning will appear here as it goes.
                   </p>
                 )}
                 {file && <p className="text-xs text-muted/70">{file.name}</p>}
