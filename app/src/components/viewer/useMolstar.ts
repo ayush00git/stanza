@@ -246,7 +246,7 @@ export function useMolstar({
       c3d.setProps({
         trackball: {
           animate: spin
-            ? { name: 'spin', params: { speed: 0.4 } }
+            ? { name: 'spin', params: { speed: 0.4, axis: [0, -1, 0] } }
             : { name: 'off', params: {} },
         },
       })
