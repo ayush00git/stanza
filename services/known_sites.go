@@ -163,6 +163,12 @@ const SelectionKnownSite = "known_site"
 // nil. An explicit hint selects a site by alias or name and overrides the mutation
 // match; otherwise the site is the one curated for this mutation.
 func LookupKnownSite(uniprotID string, mut models.Mutation, hint string) *KnownSite {
+	// A confirmed paper extraction registered at runtime takes precedence over the
+	// hardcoded curation for its exact uniprot+mutation.
+	if s := lookupRegisteredSite(uniprotID, mut); s != nil {
+		return s
+	}
+
 	sites := knownSites[strings.ToUpper(strings.TrimSpace(uniprotID))]
 	if len(sites) == 0 {
 		return nil
