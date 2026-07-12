@@ -62,6 +62,16 @@ func RegisterExtractedSite(site *models.ExtractedSite) {
 		}
 	}
 
+	// A covalent site whose reactive residue is NOT the mutation site (the case the
+	// extraction works hardest to get right — EGFR C797S removes Cys797, so the design
+	// bonds Cys775) carries that residue forward. Without it the generator would derive
+	// the covalent anchor from the mutant residue (Ser797), decide the target is not
+	// covalent, and design reversible molecules. Only set when the paper says covalent AND
+	// names the residue, so a non-covalent site never triggers the warhead brief.
+	if site.Covalent && strings.TrimSpace(site.ReactiveResidue) != "" {
+		ks.CovalentResidue = strings.TrimSpace(site.ReactiveResidue)
+	}
+
 	// MassAnchors are left nil: the v1 paper flow does not extract per-compound masses.
 	ks.Guidance = &SiteGuidance{
 		Mechanism:     site.Mechanism,

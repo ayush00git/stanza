@@ -93,6 +93,15 @@ type KnownSite struct {
 	// Template is the structure to build the WT/mutant pair on. nil falls back to
 	// the AlphaFold model.
 	Template *SiteTemplate
+	// CovalentResidue names the residue a warhead should bond, in resToken form
+	// ("Cys775"), when it is NOT the mutation site. The generator otherwise derives
+	// the covalent anchor from the mutation (a G12C installs the Cys12 it targets), but
+	// a resistance mutation can REMOVE the residue an earlier drug bonded and the design
+	// then targets a different native cysteine — EGFR C797S removes Cys797, so the design
+	// bonds Cys775. Empty means "derive from the mutation site", which is correct whenever
+	// the mutation installs the reactive residue. Set only for a covalent site whose
+	// reactive residue differs from the mutation site.
+	CovalentResidue string
 	// Guidance conditions the molecule generator. nil leaves it unsteered.
 	Guidance *SiteGuidance
 }
