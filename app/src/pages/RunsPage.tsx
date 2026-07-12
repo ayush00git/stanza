@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { createRun, listRuns, listRunsByProfile, type Run } from '../lib/api'
 import { useActiveProfile } from '../lib/profile'
 import Thinking, { RUN_PHASES } from '../components/Thinking'
+import PaperIngestPanel from '../components/runs/PaperIngestPanel'
 
 type ListStatus = 'loading' | 'done' | 'error'
 
@@ -33,6 +34,8 @@ export default function RunsPage() {
   const [mutation, setMutation] = useState('')
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
+  /** Which launcher is showing: the manual UniProt+mutation form, or the PDF ingest panel. */
+  const [source, setSource] = useState<'manual' | 'paper'>('manual')
 
   const [runs, setRuns] = useState<Run[]>([])
   const [status, setStatus] = useState<ListStatus>('loading')
@@ -53,10 +56,9 @@ export default function RunsPage() {
     return () => ctrl.abort()
   }, [active])
 
-  const submit = (e: FormEvent) => {
-    e.preventDefault()
-    const uid = uniprot.trim()
-    const mut = mutation.trim()
+  // The shared create-run path. Both the manual form and the confirmed-paper flow feed
+  // into this, so the post-create behaviour (error handling, navigation) lives in one place.
+  const startRun = (uid: string, mut: string) => {
     if (!uid || !mut || creating) return
     setCreating(true)
     setCreateError(null)
@@ -75,6 +77,19 @@ export default function RunsPage() {
         setCreateError(err instanceof Error ? err.message : 'Could not create run')
         setCreating(false)
       })
+  }
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault()
+    startRun(uniprot.trim(), mutation.trim())
+  }
+
+  // A confirmed paper hands us a target + mutation; mirror them into the form fields (so
+  // the choice is visible) and drive the same run-create path the manual form uses.
+  const handlePaperConfirmed = (uni: string, mut: string) => {
+    setUniprot(uni)
+    setMutation(mut)
+    startRun(uni.trim(), mut.trim())
   }
 
   return (
@@ -101,9 +116,38 @@ export default function RunsPage() {
             bind the mutant while sparing the wild type.
           </p>
 
+          {/* Two ways to start a run: type the target by hand, or lift it from a paper PDF. */}
+          <div className="mt-6 inline-flex rounded-md border border-hairline bg-paper-deep p-0.5">
+            {(
+              [
+                ['manual', 'Enter manually'],
+                ['paper', 'From a paper (PDF)'],
+              ] as const
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setSource(value)}
+                className={`rounded px-3 py-1 text-xs transition-colors ${
+                  source === value
+                    ? 'bg-paper text-ink shadow-[0_1px_2px_rgba(18,22,28,0.12)]'
+                    : 'text-muted hover:text-ink'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {source === 'paper' ? (
+            <div className="mt-4">
+              <PaperIngestPanel onConfirmed={handlePaperConfirmed} />
+              {createError && <p className="mt-3 text-sm text-conf-verylow">{createError}</p>}
+            </div>
+          ) : (
           <form
             onSubmit={submit}
-            className="mt-6 rounded-lg border border-hairline bg-paper-deep/40 p-5"
+            className="mt-4 rounded-lg border border-hairline bg-paper-deep/40 p-5"
           >
             <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
               <label className="flex min-w-0 flex-1 flex-col gap-1.5">
@@ -155,6 +199,7 @@ export default function RunsPage() {
               ))}
             </div>
           </form>
+          )}
           {creating && <Thinking phases={RUN_PHASES} className="mt-4" />}
         </section>
 
