@@ -54,9 +54,9 @@ Each kept molecule is shown with its SMILES and computed properties, ready to do
 
 Each candidate is docked into **both** tracks, the wild-type structure and the mutant, and scored. Molecules are ranked by a composite **fitness** that combines potency, wild-type-vs-mutant selectivity, drug-likeness, and covalent feasibility, with each track's per-seed spread reported so a margin is never read as real when it sits inside the docking noise.
 
-![Selectivity ranking, with a feedback-round molecule on the board](jm5c02924-walkthrough/6-selectivity-ranking.png)
+![Selectivity ranking after two docking rounds](jm5c02924-walkthrough/6-selectivity-ranking.png)
 
-The loop closes here. Every molecule you dock is fed back to the generator, so the next **Generate** re-designs against the measured results. This board is mid-loop: the first three molecules were docked and fed back, and the fourth is one Claude then designed against their results and docked in the next round, now ranked beside them.
+This board is the loop paying off across two rounds. The first three molecules were docked (round one). Then **Generate** was clicked again, and Claude re-designed *against those docked results*, proposing six more. One of the new molecules was docked as the fourth entry, and it came in at **rank two**, above most of the first round's docks. That is the point of closing the loop: the generator does not restart from a blank pocket, it improves on the molecules it has already been shown scored.
 
 ---
 
