@@ -14,10 +14,13 @@
 ## What it is
 
 Stanza is a drug-design loop that treats a **resistance mutation** as a first-class
-input. You give it a protein target (by UniProt accession) and a point mutation. It
-rebuilds the mutant pocket from an experimental structure, asks Claude for candidate
-molecules conditioned on that pocket, docks each candidate into a **matched wild-type /
-mutant structure pair**, and ranks the results.
+input. You give it a protein target (by UniProt accession) and a point mutation, typed
+directly or **lifted from a paper**: upload a PDF and Claude reads it into a curated site
+you confirm field by field, every field shown beside the sentence it came from (see
+[Curating a site from a paper](#curating-a-site-from-a-paper)). It rebuilds the mutant
+pocket from an experimental structure, asks Claude for candidate molecules conditioned on
+that pocket, docks each candidate into a **matched wild-type / mutant structure pair**, and
+ranks the results.
 
 The backend is Go (Gin, `:8080`). Cheminformatics and structural biology run in Python
 helpers (`scripts/`) that the Go services shell out to: RDKit, PDBFixer/OpenMM, OpenBabel,
