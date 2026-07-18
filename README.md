@@ -1,3 +1,5 @@
+<img width="2160" height="2160" alt="Hero Image _ Built with Claude_ Life Sciences" src="https://github.com/user-attachments/assets/63785ce8-e60d-4e50-9b2c-210a56fa6833" />
+
 <p align="center">
   <img src="app/public/stanza.svg" alt="Stanza" width="140" />
 </p>
